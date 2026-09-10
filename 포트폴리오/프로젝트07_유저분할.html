@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A/B 유저그룹 분류 | 로직 설계</title>
+
+    <!-- FONTS -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700&family=Noto+Sans+KR:wght@100;300;400;500;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        /* ==========================================================================
+           1. RESET & VARIABLES
+           ========================================================================== */
+        :root {
+            --bg-color: #ffffff; --text-main: #111111; --text-sub: #555555; --text-light: #999999;
+            --accent-color: #000000; --border-color: #eeeeee; --title-font-size: 1.35rem; --desc-font-size: 1.05rem;
+            --color-critical-bg: #fff5f5; --color-critical-border: #ff4b4b; --color-excellent-bg: #f0fdf4; --color-excellent-border: #00d26a;
+        }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: 'Outfit', 'Noto Sans KR', sans-serif; background: var(--bg-color); color: var(--text-main); line-height: 1.6; word-break: keep-all; }
+        
+        /* Utilities */
+        .text-left { text-align: left !important; }
+        .text-right { text-align: right !important; }
+        .mb-30 { margin-bottom: 30px; }
+        .mb-0 { margin-bottom: 0px; }
+
+        /* ==========================================================================
+           2. SCROLL & LAYOUT
+           ========================================================================== */
+        #snap-container { width: 100%; height: 100vh; overflow-y: scroll; scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #999; }
+
+        section { width: 100%; height: 100vh; scroll-snap-align: start; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 5%; box-sizing: border-box; opacity: 0; transform: translateY(20px); transition: opacity 1.0s ease, transform 1.0s ease; will-change: opacity, transform; position: relative; }
+        section.visible { opacity: 1; transform: translateY(0); }
+        .container { width: 100%; max-width: 1200px; height: 100%; display: flex; flex-direction: column; justify-content: center; }
+
+        /* ==========================================================================
+           3. TYPOGRAPHY
+           ========================================================================== */
+        h1 { font-size: 5vw; font-weight: 200; letter-spacing: -2px; line-height: 1.1; margin: 0 0 20px 0; background: linear-gradient(to bottom, #000, #444); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; text-align: left; width: 100%; }
+        h2 { font-size: 2.5rem; font-weight: 200; margin-bottom: 30px; letter-spacing: -1px; width: 100%; border-bottom: 2px solid #111; padding-bottom: 15px; color: #111; margin-top: 0; }
+        h3 { font-size: 1.5rem; font-weight: 700; margin-top: 30px; margin-bottom: 15px; color: #000; }
+        h4 { font-size: 1.25rem; color: #111; font-weight: 700; border-bottom: 2px solid #111; padding-bottom: 10px; display: block; margin-top: 0; margin-bottom: 10px; }
+        p { font-weight: 300; font-size: 1.1rem; color: #333; margin-bottom: 1.5rem; max-width: 900px; line-height: 1.8; }
+        strong { font-weight: 700; color: #000; }
+
+        .split-content-title { margin-bottom: 25px; font-size: var(--title-font-size); font-weight: 700; letter-spacing: -0.5px; line-height: 1.4; color: #000; border-bottom: 2px solid #000; padding-bottom: 15px; display: block; }
+        .split-content-desc { font-size: var(--desc-font-size); line-height: 1.8; letter-spacing: -0.25px; color: #444; }
+
+        /* ==========================================================================
+           4. NAVIGATION
+           ========================================================================== */
+        nav { position: fixed; right: 40px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 20px; z-index: 1000; align-items: flex-end; }
+        nav a { width: 12px; height: 12px; border-radius: 50%; background: #e5e5e5; transition: all 0.3s; cursor: pointer; position: relative; display: flex; align-items: center; justify-content: flex-end; text-decoration: none; }
+        nav a.active { background: #000; transform: scale(1.4); }
+        nav a::before { content: attr(data-label); position: absolute; right: 25px; font-size: 0.8rem; color: var(--text-light); font-weight: 300; white-space: nowrap; opacity: 1; transition: opacity 0.3s, color 0.3s; }
+        nav a.active::before { color: #000; font-weight: 500; }
+
+        /* ==========================================================================
+           5. SPLIT LAYOUT SYSTEM
+           ========================================================================== */
+        .split-layout-container, .hero-container-split { display: flex; align-items: stretch; justify-content: center; width: 100%; max-width: 1400px; gap: 60px; padding-top: 40px; }
+        .hero-container-split { min-height: 50vh; }
+        .split-divider, .hero-divider { width: 1px; height: auto; background-color: #ddd; flex: 0 0 1px; align-self: stretch; }
+
+        /* Hero Columns */
+        .hero-col-left { flex: 1; text-align: right; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
+        .hero-col-right { flex: 1; text-align: left; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; }
+        .hero-title-main, .split-title-main { font-size: 5vw; line-height: 1.1; margin: 0; font-weight: 200; letter-spacing: -2px; color: #111; background: linear-gradient(to bottom, #000, #444); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero-title-sub, .split-title-sub { font-size: 2vw; font-weight: 300; margin-top: 15px; color: #555; letter-spacing: -1px; }
+        .hero-desc-kor { font-size: 1.5rem; line-height: 1.8; font-weight: 300; color: #444; word-break: keep-all; }
+
+        /* Content Columns */
+        .col-title-left { flex: 1; text-align: right; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-start; }
+        .col-content-right { flex: 1; text-align: left; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; }
+        .col-content-left { flex: 1; text-align: right; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; }
+        .col-title-right { flex: 1; text-align: left; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; }
+        .split-desc-box { font-size: 1.1rem; line-height: 1.6; font-weight: 300; color: #444; max-width: 600px; word-break: keep-all; }
+
+        /* Section Overrides */
+        #problem .col-content-left, #solution .col-content-right, #validation .col-content-left, #analogy .col-content-right, #results .col-content-left { padding-top: 15px; align-self: flex-end; }
+        #problem .col-title-right, #solution .col-title-left, #validation .col-title-right, #analogy .col-title-left { padding-top: 0; }
+
+        /* ==========================================================================
+           6. COMPONENTS
+           ========================================================================== */
+        /* Result Box */
+        .result-item-box { text-align: left; }
+        .res-sub-kr { font-size: 1.2rem; font-weight: 700; margin-bottom: 2px; }
+        .res-sub-en { font-size: 0.9rem; color: #999; margin-bottom: 15px; font-weight: 300; }
+        .btn-black { padding: 8px 24px; background: #000; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; transition: 0.3s; }
+        .btn-black:hover { opacity: 0.8; transform: scale(1.05); }
+
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255, 255, 255, 0.98); display: none; justify-content: center; align-items: center; z-index: 2147483647; opacity: 0; transition: opacity 0.3s ease; }
+        .modal-content { background: #fff; width: 90%; height: 90%; max-width: 1400px; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #ddd; transform: translateY(20px); transition: transform 0.3s ease; will-change: transform, opacity; }
+        .modal-content.pc-mode { flex-direction: row; max-width: 1600px; }
+        .modal-header { padding: 20px 30px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #fafafa; }
+        .modal-title { font-size: 1.25rem; font-weight: 600; color: #111; }
+        .close-btn { background: none; border: none; font-size: 2rem; line-height: 1; cursor: pointer; color: #999; padding: 0 10px; transition: color 0.2s; }
+        .close-btn:hover { color: #e74c3c; }
+
+        /* Modal Sidebar */
+        .modal-sidebar { display: none; width: 240px; background: #f8f9fa; border-right: 1px solid #eee; padding: 30px; flex-direction: column; gap: 20px; flex-shrink: 0; }
+        .modal-sidebar .sidebar-title { font-size: 1.2rem; font-weight: 800; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 2px solid #000; }
+        .sidebar-info-group label { display: block; font-size: 0.8rem; color: #999; margin-bottom: 4px; text-transform: uppercase; font-weight: 700; }
+        .sidebar-info-group span { display: block; font-size: 1rem; font-weight: 600; color: #333; }
+
+        /* Modal Right Panel & Carousel */
+        .modal-right-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        .modal-right-panel .modal-header { padding: 15px 30px; }
+        .modal-body-carousel { flex: 1; overflow: hidden; background: #fff; position: relative; display: flex; flex-direction: column; }
+        .carousel-track { display: flex; width: 300%; height: 100%; transition: transform 0.5s cubic-bezier(0.25, 1, 0.5, 1); will-change: transform; }
+        .carousel-slide { width: 33.3333%; height: 100%; padding: 30px 40px; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; }
+        .slide-header h3 { margin: 0 0 5px 0; font-size: 1.2rem; color: #111; font-weight: 700; }
+        .slide-header p { margin: 0 0 20px 0; font-size: 0.9rem; color: #666; }
+        .carousel-nav { display: flex; justify-content: center; gap: 15px; padding: 20px; background: #fff; border-top: 1px solid #eee; }
+        .nav-dot { width: 12px; height: 12px; border-radius: 50%; background: #ddd; border: none; cursor: pointer; transition: all 0.3s; }
+        .nav-dot.active { background: #111; transform: scale(1.3); }
+        .nav-dot:hover { background: #999; }
+
+        /* Table */
+        .table-container-scroll { flex: 1; overflow: auto; border: 1px solid #eee; border-radius: 8px; box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.02); }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; table-layout: fixed; }
+        .data-table th, .data-table td { padding: 8px; text-align: center; border-bottom: 1px solid #eee; border-right: 1px solid #f5f5f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .data-table th { position: sticky; top: 0; background: #222; color: #fff; z-index: 10; font-weight: 500; }
+        .data-table tr:nth-child(even) { background-color: #fafafa; }
+        .data-table tr:hover { filter: brightness(0.95); }
+        .limit-cell { font-weight: bold; color: #555; }
+
+        /* ==========================================================================
+           7. ANIMATIONS
+           ========================================================================== */
+        .type-cursor { display: inline-block; white-space: nowrap; overflow: hidden; background: none; -webkit-background-clip: border-box; background-clip: border-box; -webkit-text-fill-color: #111; color: #111; font-weight: 200; line-height: 1.1; }
+        .cursor-active { border-right: 3px solid #000; animation: blink-caret 0.75s step-end infinite; }
+        .highlight-text { position: relative; z-index: 1; display: inline-block; }
+        .highlight-text::before { content: ''; position: absolute; bottom: -10px; left: 0; width: 100%; height: 15%; background: #ffff00; z-index: -1; transform-origin: left; transform: scaleX(0); transition: transform 4.8s cubic-bezier(0.22, 1, 0.36, 1); will-change: transform; }
+        .highlight-active::before { transform: scaleX(1); }
+        @keyframes blink-caret { from, to { border-color: transparent } 50% { border-color: #000; } }
+        @keyframes waveText { 0%, 100% { transform: rotate(180deg) translateY(0); } 50% { transform: rotate(180deg) translateY(-10px); } }
+
+        /* ==========================================================================
+           8. CODE BLOCK & ETC
+           ========================================================================== */
+        .code-container { width: 100%; margin-bottom: 30px; }
+        .code-header { font-size: 0.9rem; font-weight: 700; color: #333; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .code-box { background: #f4f4f4; padding: 20px; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; font-size: 0.85rem; line-height: 1.5; color: #333; overflow-x: auto; white-space: pre; max-height: 300px; border: 1px solid #eee; }
+        .copy-btn { background: #fff; border: 1px solid #ddd; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; border-radius: 4px; font-family: 'Outfit', sans-serif; transition: all 0.2s; }
+        .copy-btn:hover { background: #f0f0f0; border-color: #bbb; }
+        .highlight-code { background-color: #daff00; color: #000; padding: 2px 4px; font-weight: bold; border-radius: 2px; box-shadow: 0 0 5px rgba(218, 255, 0, 0.5); }
+        .copyright-watermark { position: fixed; bottom: 40px; left: 5px; z-index: 9999; writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); font-family: inherit; font-weight: 500; color: #000; letter-spacing: 4px; font-size: 0.7rem; text-transform: uppercase; white-space: nowrap; cursor: default; animation: waveText 3s infinite ease-in-out; pointer-events: none; }
+
+        /* Media Queries */
+        @media (max-width: 768px) {
+            h1 { font-size: 3rem; }
+            section { height: auto; min-height: 100vh; padding: 80px 20px; }
+            .hero-container-split, .split-layout-container { flex-direction: column; gap: 40px; height: auto; }
+            .hero-divider, .split-divider { width: 80px; height: 1px; }
+            .hero-col-left, .hero-col-right, .col-title-left, .col-content-right, .col-content-left, .col-title-right { align-items: center; text-align: center; }
+            .split-desc-box h4, .split-desc-box p, .split-content-title, .split-content-desc { text-align: center !important; }
+            #snap-container { scroll-snap-type: none; }
+            nav { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- NAVIGATION DOTS -->
+    <nav>
+        <a href="#hero" class="active" onclick="scrollToId('hero'); return false;" data-label="OVERVIEW"></a>
+        <a href="#objective" onclick="scrollToId('objective'); return false;" data-label="OBJECTIVE"></a>
+        <a href="#problem" onclick="scrollToId('problem'); return false;" data-label="PROBLEM"></a>
+        <a href="#solution" onclick="scrollToId('solution'); return false;" data-label="SOLUTION"></a>
+        <a href="#validation" onclick="scrollToId('validation'); return false;" data-label="VALIDATION"></a>
+        <a href="#analogy" onclick="scrollToId('analogy'); return false;" data-label="ANALOGY"></a>
+        <a href="#results" onclick="scrollToId('results'); return false;" data-label="RESULTS"></a>
+        <a href="#appendix" onclick="scrollToId('appendix'); return false;" data-label="APPENDIX"></a>
+    </nav>
+
+    <!-- MAIN SCROLL CONTAINER -->
+    <main id="snap-container">
+
+        <!-- 0. HERO SECTION -->
+        <section id="hero">
+            <div class="container">
+                <div class="hero-container-split">
+                    <div class="hero-col-left">
+                        <div class="hero-title-main"><span id="hero-type-1" class="type-cursor"></span></div>
+                        <div class="hero-title-main"><span id="hero-type-2" class="type-cursor"></span></div>
+                        <div class="hero-title-main"><span id="hero-type-3" class="type-cursor"></span></div>
+                        <div class="hero-title-sub"><span id="hero-type-4" class="type-cursor"></span></div>
+                    </div>
+                    <div class="hero-divider"></div>
+                    <div class="hero-col-right">
+                        <div class="hero-desc-kor">
+                            데이터의 불확실성을 구조적으로 제어하고,<br>
+                            <span id="hero-count" style="font-weight:700;">0</span> 회의 시뮬레이션을 기반으로,<br>
+                            변동성에 강건한 A/B 유저그룹 분류 로직 개발
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 1. OBJECTIVE SECTION -->
+        <section id="objective">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-title-left">
+                        <div class="split-title-main">Objective</div>
+                        <div class="split-title-sub">사전 설계<br>Pre-Experimental Design</div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-content-right">
+                        <div class="split-desc-box">
+                            <h4 class="split-content-title text-left">Calibration of User Group Assignment, via Statistics</h4>
+                            <p class="split-content-desc mb-30 text-left">
+                                본 프로젝트의 목적은 특정 A/B 테스트의 성능을 개선하는 것이 아닙니다.<br>
+                                유저그룹을 A/B 군으로 분류하는 과정에서 <strong>이론적 근거</strong>를 확보하는 것입니다.<br>
+                                즉, 기존 분류 방식의 한계를 극복하기 위한 신규 분류 로직 설계가 목적입니다.
+                            </p>
+                            <p class="split-content-desc mb-30 text-left">
+                                120개 유저그룹을 60:60 으로 분할하는 조합수는 <strong>약 10의 35승</strong> 수준입니다.<br>
+                                우주보다 큰 숫자이기 때문에, 우리는 A/B군 분할 조합을 샘플링 해야합니다.<br>
+                                하드웨어 조건을 고려하여, 충분히 큰 규모인 1억 회의 시뮬레이션을 수행합니다.
+                            </p>
+                            <p class="split-content-desc mb-0 text-left">
+                                본 보고서의 신규 로직은 특정 A/B테스트 결과를 직접 개선하는 것이 아닙니다.<br>
+                                최종 A/B테스트의 실험 결과 해석에서 <strong>사전 설계에 문제가 없도록</strong> 하는 것이며,<br>
+                                분류된 A/B군이 <strong>동등한 규모의 조건</strong>에서 실험될 수 있도록 설계하는 것입니다.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2. PROBLEM SECTION -->
+        <section id="problem">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-content-left">
+                        <div class="split-desc-box">
+                            <h4 class="split-content-title text-right">Limitations of 2-Weeks User Splitting, under Volatility</h4>
+                            <p class="split-content-desc mb-30 text-right">
+                                기존에는 2주치 데이터 기준으로만 유저 그룹을 A/B군으로 분류했습니다.<br>
+                                하지만 지면·광고주·프레임·소재의 변화에 따라 데이터는 요동칩니다.<br>
+                                광고 도메인은 구조적으로 <strong>변동성(Volatility)</strong>이 필연적인 환경입니다.
+                            </p>
+                            <p class="split-content-desc mb-30 text-right">
+                                2주치 데이터만으로 분류한 A/B군의 균형은 오차범위 이내였지만,
+                                <br>실제 A/B테스트를 실행하고 불과 하루가 채 지나지 않는 시점에서,<br>
+                                A/B군 간 지표가 오차범위를 벗어나는 <strong>균형 붕괴 현상</strong>을 포착했습니다.
+                            </p>
+                            <p class="split-content-desc mb-0 text-right">
+                                <strong>자연적으로 발생하는 변동성</strong>을 완전히 제거하는 것은 불가능합니다.<br>
+                                하지만 우리는 A/B 군분류 이후에도 균형 붕괴라는 <strong>리스크 최소화</strong>를 위해,<br>
+                                A/B군의 강건한 균형을 보장하는 <strong>구조적 시스템</strong>이 필요하다 판단했습니다.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-title-right">
+                        <div class="split-title-main">Problem</div>
+                        <div class="split-title-sub">자연적 변동성<br>Natural Volatility</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3. SOLUTION SECTION -->
+        <section id="solution">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-title-left">
+                        <div class="split-title-main">Solution</div>
+                        <div class="split-title-sub">구조적 제약 탐색<br>Structural Constrained Search</div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-content-right">
+                        <div class="split-desc-box">
+                            <h4 class="split-content-title text-left">Structural Reduction of the Space, with Pair-Matching</h4>
+                            <p class="split-content-desc mb-30 text-left">
+                                오차범위에 들어올 때까지 랜덤 탐색하는 군분류 방식은 매우 비효율적입니다.<br>
+                                우리는 이를 해결하기 위해 기준일 직전 1주차의 데이터를 기준점으로 삼아,
+                                <br>유사한 규모의 그룹을 묶어주는 <strong>쌍분류(Pair-Matching)</strong>를 실행 했습니다.
+                            </p>
+                            <p class="split-content-desc mb-30 text-left">
+                                이는 A/B군 간 분산을 사전에 최대한 축소하기 위한 <strong>구조적인 제약 방식</strong>입니다.<br>
+                                무작위 탐색 대비 탐색 공간을 제한하여 안정적인 조합에 빠르게 수렴하도록,<br>
+                                층화(Stratified) 추출과 유사한 목적을 갖는 <strong>실험 설계적 접근</strong>입니다.
+                            </p>
+                            <p class="split-content-desc mb-0 text-left">
+                                의도적으로 제약을 생성하여 축소된 <strong>60개의 쌍</strong>이라는 탐색 공간을 기반으로,<br>
+                                60개 쌍에 묶인 유저그룹을 A/B군에 분배하는 시뮬레이션을 1억 회 수행합니다.<br>
+                                이는 수학적인 <strong>최적해</strong> 도출이 아닌 <strong>최적 조합</strong>을 찾는 경험적인 탐색 방법론입니다.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. VALIDATION SECTION -->
+        <section id="validation">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-content-left">
+                        <div class="split-desc-box" style="width: 100%; max-width: 500px;">
+                            <h4 class="split-content-title text-right">Robustness of A/B Group Assignment, over Time</h4>
+                            <p class="split-content-desc mb-30 text-right">
+                                우리 회사의 오차범위 관행은 <strong>[노출 오차 0.01% & CTR 오차 0.1%]</strong> 입니다.<br>
+                                하지만 이 오차범위로는 견고한 A/B 군분류가 <strong>불가능함</strong>을 확인하였습니다.<br>
+                                이에 오차범위를 다차원으로 확장하여 최적의 오차범위를 재탐색했습니다.
+                            </p>
+                            <p class="split-content-desc mb-30 text-right">
+                                우리는 시뮬레이션에서 도출된 A/B 군분류가 초기 시점에 우연의 일치인지,<br>
+                                아니면 기간이 확장되더라도 구조적으로 충분히 견고한지를 검증하기 위해,<br>
+                                다기간 <strong>시계열 지속성 검증(Temporal Robustness Test)</strong>을 도입했습니다.
+                            </p>
+                            <p class="split-content-desc mb-0 text-right">
+                                오차범위·플랫폼·성능목표 기준 별 <strong>최적의 A/B 군분류</strong>를 도출 했습니다.<br>
+                                또한 A/B테스트의 <strong>목적에 따라</strong> A/B 군분류 선택이 가능하도록 설계하였고,<br>
+                                이제 A/B 군분류는 단순 분류가 아닌 <strong>의사결정의 대상</strong>으로 전환 됩니다.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-title-right">
+                        <div class="split-title-main">Validation</div>
+                        <div class="split-title-sub">시계열적 강건함<br>Temporal Robustness</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 5. ANALOGY SECTION -->
+        <section id="analogy">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-title-left">
+                        <div class="split-title-main">Analogy</div>
+                        <div class="split-title-sub">구조적 안정성<br>Stable Structure</div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-content-right">
+                        <div class="split-desc-box">
+                            <h4 class="split-content-title text-left">Naive A/B Grouping : A Sandcastle Built on the Beach</h4>
+                            <p class="split-content-desc mb-30 text-left">
+                                기존 A/B 군분류는 맑은 날 해변에 쌓아 올린 <strong>모래성</strong>과 같습니다.<br>
+                                초기에는 균형이 잘 유지되지만 파도나 바람과 같은 <strong>외부 변수</strong>가 발생하는 순간,<br>
+                                모래성은 구조적 한계로 인해 <strong>전체 설계가 쉽게 붕괴</strong>될 가능성이 높습니다.
+                            </p>
+                            <br><br>
+                            <h4 class="split-content-title text-left">Robust A/B Grouping : A Seismically Designed Building</h4>
+                            <p class="split-content-desc mb-0 text-left">
+                                새로운 A/B 군분류는 수많은 테스트를 거쳐 건설된 <strong>내진 설계 건물</strong>과 같습니다.<br>
+                                초기 군분류 이후 발생할 지진과 같은 <strong>외부 변수의 변동성</strong>을 사전에 고려하여,<br>
+                                시간에 따라 발생하는 다양한 충격 속에서도 <strong>균형이 유지</strong>되도록 설계되었습니다.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 6. RESULTS SECTION -->
+        <section id="results" style="background:#fff;">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-content-left" style="align-self: center;">
+                        <div class="split-desc-box">
+                            <h4 class="split-content-title text-right">Instability of Legacy System</h4>
+                            <p class="split-content-desc mb-30 text-right">
+                                기존 우리 회사의 관행이었던 <strong>[노출오차 0.01%, CTR오차 0.1%]</strong> 기준에서는,<br>
+                                초기에 안정적으로 보이던 A/B 군분류가 2주차를 못버티고 <strong>붕괴</strong> 되었습니다.<br>
+                                이는 <strong>현재의 오차범위가 너무 엄격하다</strong> 라는 명확한 경험적 결과였습니다.
+                            </p>
+                            <br><br>
+                            <h4 class="split-content-title text-right">Empirical Proof of Robustness</h4>
+                            <p class="split-content-desc mb-0 text-right">
+                                우리는 안정적인 A/B 군분류를 100% 예측하는 <strong>기적</strong>을 만든 것이 아닙니다.<br>
+                                대신 A/B테스트 목적에 따라 시뮬레이션을 견뎌낸 A/B 군분류를 <strong>선별</strong>함으로써,<br>
+                                외부 변수들에 <strong>확률적으로 강건</strong>하며 <strong>통계적으로 안전한 선택지</strong>를 도출했습니다.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-content-right" style="display: flex; flex-direction: column; justify-content: space-between; gap: 40px;">
+                        <div class="title-block">
+                            <div class="split-title-main">Results</div>
+                            <div class="split-title-sub">대규모 시뮬레이션<br>Large-Scale Simulation</div>
+                        </div>
+                        <div class="buttons-block" style="display: flex; flex-direction: row; gap: 40px;">
+                            <div class="result-item-box">
+                                <div class="res-sub-kr">PC 시뮬레이션</div>
+                                <div class="res-sub-en">Past & Future</div>
+                                <button class="btn-black" onclick="openModal('modal-pc')">View</button>
+                            </div>
+                            <div class="result-item-box">
+                                <div class="res-sub-kr">MW 시뮬레이션</div>
+                                <div class="res-sub-en">Past & Future</div>
+                                <button class="btn-black" onclick="openModal('modal-mobileweb')">View</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 7. APPENDIX SECTION -->
+        <section id="appendix">
+            <div class="container">
+                <div class="split-layout-container">
+                    <div class="col-title-left">
+                        <div class="split-title-main">Appendix</div>
+                        <div class="split-title-sub">파이썬 스크립트<br>Source Code - Python</div>
+                    </div>
+                    <div class="split-divider"></div>
+                    <div class="col-content-right" style="min-width: 0;">
+                        <div class="split-desc-box" style="width: 100%; max-width: 520px;">
+                            <div class="code-container">
+                                <div class="code-header">
+                                    <span>Python Script</span>
+                                    <button class="copy-btn" onclick="copyCode('code-1')">Copy</button>
+                                </div>
+                                <div id="code-1" class="code-box"># AB테스트_통합_시뮬레이션.py
+
+
+################################################################################################################################################################################################
+#      [🔥 1. 목표 설정]: <span class="highlight-code">아래 [1-1] / [1-2] 만 입력하세요 !!</span>
+################################################################################################################################################################################################
+
+
+### [☀️ 1-1. 목표 입력]: 유저 A/B군 분리 기간 입력
+ANALYSIS_WEEKS = <span class="highlight-code">[A/B테스트 목표 주차 숫자]</span>
+
+
+### [☀️ 1-2. 정보 입력]: DB 접속 정보 입력
+DB_CONFIG = {'host'     : <span class="highlight-code">[DB IP 주소]</span>,
+             'user'     : <span class="highlight-code">[연결하는 사용자 ID]</span>,
+             'password' : <span class="highlight-code">[연결하는 사용자 PW]</span>,
+             'database' : <span class="highlight-code">[스키마 이름]</span>,
+             'port'     : <span class="highlight-code">[포트 번호]</span>}
+
+
+################################################################################################################################################################################################
+# [🔥 2. 초기 설정]: 스크립트 실행에 필요한 초기 환경 구성
+################################################################################################################################################################################################
+
+
+### [☀️ 2-1. 라이브러리 호출]: 코드 실행에 필요한 라이브러리 호출
+import sys, rmm, pytz, pymysql, warnings
+
+import cupy as cp
+import pandas as pd
+
+from itertools import product
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
+
+warnings.filterwarnings("ignore")
+
+
+### [☀️ 2-2. GPU 메모리 제한]: OOM(Out Of Memory) 방지를 위해 최대 10GB로 제한
+rmm.reinitialize(managed_memory= True, pool_allocator= True, initial_pool_size= 10*(1024**3))
+
+
+################################################################################################################################################################################################
+# [🔥 3. 메인 함수 정의]: 데이터 처리의 모든 과정을 포함하는 메인 함수 정의
+################################################################################################################################################################################################
+
+
+def main():
+
+    ############################################################################################################################################################################################
+    ### [☀️ 3-1. 작업 환경 설정]: 데이터 처리 전, 필요한 환경과 변수 설정
+    ############################################################################################################################################################################################
+
+
+    ##### [💧 3-1-1. 기준 시간 변수 정의]: 서울 시간대 기준, 작업에 필요한 날짜 변수 생성
+    seoul = pytz.timezone('Asia/Seoul')
+    today = datetime.now(seoul)
+
+    start_time = datetime.now(seoul)
+    base_date  = today - timedelta(days= 1)
+
+
+    ##### [💧 3-1-2. 전역 상수 정의]: 시뮬레이션 및 오차범위 설정
+    N_SIMULATIONS = 500_000_000
+    BATCH_SIZE    = 1_000_000
+    PLATFORMS     = ['01', '02']
+
+
+    ##### [💧 3-1-3. 조건 정의]: 노출 및 CTR 오차범위 조합 정의
+    EXP_TOLS   = [0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0010, 0.0015, 0.0020, 0.0025, 0.0030, 0.0035, 0.0040, 0.0045, 0.0050, 0.0075, 0.0100]
+    CTR_TOLS   = [0.0010, 0.0020, 0.0030, 0.0040, 0.0050, 0.0075, 0.0100]
+    CONDITIONS = {f"C{i:03d}": pair for i, pair in enumerate(product(EXP_TOLS, CTR_TOLS), start= 1)}
+
+
+    # [⏰ LOGGING 1]: 작업 시작 로깅
+    print(f'[🔥 TIME LOG (1)] AB 테스트 그룹 분할 시뮬레이션을 시작합니다. \n   ({start_time})')
+
+
+    ############################################################################################################################################################################################
+    ### [☀️ 3-2. 분석 기간 검증 및 산출]: 데이터 보관 한계 확인, Train/Test 분기점 계산, 최종 분석 날짜 확정
+    ############################################################################################################################################################################################
+
+
+    ##### [💧 3-2-1. 데이터 보관 한계 검증]: 시작일이 6개월 전(1일)보다 과거인지 확인
+    limit_date_start  = (today - relativedelta(months= 6)).replace(day= 1)
+    total_days_needed = ANALYSIS_WEEKS * 7 * 2
+    calc_start_date   = base_date - timedelta(days= total_days_needed - 1)
+
+    if calc_start_date < limit_date_start:
+        raise ValueError(f"❌ [ERROR] 분석 기간이 데이터 보관 한계를 초과했습니다.\n   - 요청 시작일: {calc_start_date.strftime('%Y-%m-%d')}\n   - 데이터 한계: {limit_date_start.strftime('%Y-%m-%d')}\n   - 주차를 줄여주세요.")
+
+
+    ##### [💧 3-2-2. 기간별 날짜 정의]: 미래(Test) 및 과거(Train) 분석 기간 설정
+    test_end_date    = base_date
+    split_point      = base_date - timedelta(days= ANALYSIS_WEEKS * 7)
+    train_start_date = split_point - timedelta(days= ANALYSIS_WEEKS * 7) + timedelta(days= 1)
+
+    start_date_int = int(train_start_date.strftime('%Y%m%d'))
+    end_date_int   = int(test_end_date.strftime('%Y%m%d'))
+
+
+    ##### [💧 3-2-3. 최종 날짜 정리]: 오늘 날짜, 분석 기간, 데이터한계 등 결과 출력
+    print(f"\n======================================================================")
+    print(f"  [설정 요약 (Config Summary)]")
+    print(f"  - 오늘 날짜       : {today.strftime('%Y-%m-%d')}")
+    print(f"  - 데이터 한계     : {limit_date_start.strftime('%Y-%m-%d')} (최대 6개월)")
+    print(f"  - 과거 분석 기간 : {train_start_date.strftime('%Y-%m-%d')} ~ {split_point.strftime('%Y-%m-%d')} ({ANALYSIS_WEEKS}주)")
+    print(f"  - 미래 검증 기간 : {(split_point + timedelta(days= 1)).strftime('%Y-%m-%d')} ~ {test_end_date.strftime('%Y-%m-%d')} ({ANALYSIS_WEEKS}주)")
+    print(f"======================================================================\n")
+
+
+    ############################################################################################################################################################################################
+    ### [☀️ 3-3. 데이터 추출 및 전처리]: SQL 데이터 조회 및 인덱싱
+    ############################################################################################################################################################################################
+
+
+    ##### [💧 3-3-1. SQL 쿼리 정의]: 설정 주차에 따른 데이터 조회를 위한 쿼리 정의 (조건 확인 필: ADVRTS_PRDT_CODE, AB_TEST_TY 등)
+    query = f'''
+             SELECT
+                 STATS_DTTM,
+                 AB_TEST_TY,
+                 PLTFOM_TP_CODE, 
+                 SUM(PAR_EPRS_CNT) AS PAR_EPRS_CNT, 
+                 SUM(CLICK_CNT) AS CLICK_CNT, 
+                 SUM(CLICK_CNT) / NULLIF(SUM(PAR_EPRS_CNT), 0) * 100 AS CTR
+             FROM 
+                 BILLING.AB_FRAME_SIZE
+             WHERE 1=1
+                 AND STATS_DTTM >= {start_date_int}
+                 AND STATS_DTTM <= {end_date_int}
+                 AND PLTFOM_TP_CODE IN ('01','02')
+                 AND ADVRTS_PRDT_CODE = '01'
+                 AND AB_TEST_TY LIKE 'AZ%'
+                 AND ITL_TP_CODE = '01'
+                 AND PAR_TP_CODE = '01'
+                 AND PRDT_TP_CODE = '01'
+             GROUP BY 
+                 STATS_DTTM,
+                 AB_TEST_TY,
+                 PLTFOM_TP_CODE
+             ORDER BY 
+                 STATS_DTTM,
+                 AB_TEST_TY,
+                 PLTFOM_TP_CODE
+             '''
+
+
+    ##### [💧 3-3-2. DB 연결 및 데이터 조회]: DB 연결 및 쿼리 연결 & 실행 후 결과를 데이터프레임으로 로드
+    conn   = pymysql.connect(host= DB_CONFIG["host"], user= DB_CONFIG["user"], password= DB_CONFIG["password"], database= DB_CONFIG["database"], port= DB_CONFIG["port"], connect_timeout= 10)
+    df_raw = pd.read_sql(query, con= conn)
+
+    conn.close()
+
+
+    ####### [💧 3-3-3. 그룹 ID 매핑]: 문자열 그룹명(AZ001...)을 정수형 ID(0~119)로 변환
+    df_raw['GROUP_ID'] = df_raw['AB_TEST_TY'].str.extract('(\\d+)').astype(int) - 1
+
+
+    ####### [💧 3-3-4. 주차 인덱싱]: 분기점 기준 날짜 차이 계산 및 주차 부여
+    df_raw['DATE_OBJ'] = pd.to_datetime(df_raw['STATS_DTTM'].astype(str), format= '%Y%m%d')
+    split_date_obj     = pd.to_datetime(split_point.strftime('%Y%m%d'), format= '%Y%m%d')
+    diff_days_cp       = cp.asarray((df_raw['DATE_OBJ'] - split_date_obj).dt.days.values, dtype= cp.int64)
+    week_idx_cp        = cp.where(diff_days_cp <= 0, cp.abs(diff_days_cp) // 7, ((diff_days_cp - 1) // 7) + ANALYSIS_WEEKS)
+
+    df_raw['WEEK_IDX'] = cp.asnumpy(week_idx_cp)
+
+
+    ####### [💧 3-3-5. 원본 데이터 CSV 저장]: 시뮬레이션 전, 원본 데이터셋 칼럼수정 적용 및 로컬 저장
+    df_export = df_raw.copy()
+
+    df_export['PAR_EPRS_CNT'] = df_export['PAR_EPRS_CNT'].astype(int)
+    df_export['CLICK_CNT']    = df_export['CLICK_CNT'].astype(int)
+
+    week_idx_cp           = cp.asarray(df_export['WEEK_IDX'].values, dtype= cp.int64)
+    week_idx_user_cp      = cp.where(week_idx_cp < ANALYSIS_WEEKS, -(week_idx_cp + 1), week_idx_cp - ANALYSIS_WEEKS + 1)
+    df_export['WEEK_IDX'] = cp.asnumpy(week_idx_user_cp)
+
+    raw_filename = f"AB_Test_Raw_Data_{start_date_int}_{end_date_int}.csv"
+    print(f'   - 원본 데이터 저장 완료: {raw_filename}')
+    df_export[['STATS_DTTM', 'WEEK_IDX', 'AB_TEST_TY', 'PLTFOM_TP_CODE', 'PAR_EPRS_CNT', 'CLICK_CNT', 'CTR']].to_csv(raw_filename, index= False)
+    del df_export
+
+
+    # [⏰ LOGGING 2]: 작업 시간 로깅
+    log_time_2 = datetime.now(seoul)
+    print(f'\n   - [⏰ TIME LOG (2)] [{(log_time_2 - start_time).total_seconds():.2f} 초] >>> SQL 데이터 로드 및 전처리 완료 ({len(df_raw):,} 행)')
+
+
+    ############################################################################################################################################################################################
+    ### [☀️ 3-4. 시뮬레이션 준비]: 3D 텐서 변환 및 전역 통계 계산
+    ############################################################################################################################################################################################
+
+
+    ##### [💧 3-4-1. 플랫폼별 for 문 생성]: PC / MW 연속 수행 구조 생성
+    final_results = []
+    
+    for platform in PLATFORMS:
+        print(f'\n============================================================================================================================================')
+        print(f'  [리포트] {("PC" if platform == "01" else "모바일(MW)")} 플랫폼 ({platform}) 시뮬레이션 시작')
+        print(f'============================================================================================================================================')
+
+        
+        ##### [💧 3-4-2. 3D 텐서 생성]: 통계집계 효율화를 위해 DF를 (그룹, 주차, 메트릭:0=노출/1=클릭) 3차원 텐서로 변환
+        df_plat = df_raw[df_raw['PLTFOM_TP_CODE'] == platform]
+        df_agg  = df_plat.groupby(['GROUP_ID', 'WEEK_IDX'])[['PAR_EPRS_CNT', 'CLICK_CNT']].sum().reset_index()
+
+        total_weeks_idx = ANALYSIS_WEEKS * 2
+        data_tensor     = cp.zeros((120, total_weeks_idx, 2), dtype= cp.float32)
+
+        for _, row in df_agg.iterrows():
+            g_id = int(row['GROUP_ID'])
+            w_id = int(row['WEEK_IDX'])
+
+            if 0 <= w_id < total_weeks_idx:
+                data_tensor[g_id, w_id, 0] = row['PAR_EPRS_CNT']
+                data_tensor[g_id, w_id, 1] = row['CLICK_CNT']
+
+        
+        ##### [💧 3-4-3. 쌍분류 (Pair-Matching) 준비]: 기준일 직전 1주차(Past 1w) 노출수 기준 정렬 및 Pair Index 생성
+        past_1w_idx    = ANALYSIS_WEEKS - 1
+        past_1w_exp    = data_tensor[:, past_1w_idx, 0].get()
+        sorted_indices = cp.argsort(past_1w_exp)
+        pairs_indices  = sorted_indices.reshape(60, 2)
+        
+        reordered_tensor = data_tensor[pairs_indices] 
+
+
+        ##### [💧 3-4-4. 전역 통계 계산]: 전체 합계 및 B그룹 계산용 데이터 준비
+        total_stats = cp.sum(data_tensor, axis= 0)
+        
+        total_past_raw   = total_stats[:ANALYSIS_WEEKS, :]
+        total_future_raw = total_stats[ANALYSIS_WEEKS:, :]
+
+        total_past_cum   = cp.cumsum(total_past_raw, axis= 0)
+        total_future_cum = cp.cumsum(total_future_raw, axis= 0)
+
+
+        ############################################################################################################################################################################################
+        ### [☀️ 3-5. 시뮬레이션 수행]: 배치 단위 몬테카를로 시뮬레이션 및 최적해 탐색
+        ############################################################################################################################################################################################
+
+
+        ##### [💧 3-5-1. 배치 설정]: 1억 회 시뮬레이션을 메모리 한계 고려하여 배치 단위로 수행
+        n_chunks          = N_SIMULATIONS // BATCH_SIZE
+        plat_best_results = {}
+        
+        consol_survival_decay_past   = {c: cp.zeros(ANALYSIS_WEEKS, dtype= cp.int32) for c in CONDITIONS}
+        consol_survival_decay_future = {c: cp.zeros(ANALYSIS_WEEKS, dtype= cp.int32) for c in CONDITIONS}
+
+
+        ##### [💧 3-5-2. 헬퍼 함수 정의]: 시뮬레이션 내부에서 사용할 유틸리티 함수 (가중 CTR 계산 등 포함)
+        def fmt_cnt(n):
+            if n >= 1_000_000:
+                return f"{int(round(n/1000)):,}K"
+            return f"{n:,}"
+
+        def calc_valid_mean_err(err_tensor, surv_mask, n_surv):
+            sum_err = cp.sum(err_tensor * surv_mask, axis= 1)
+            denom   = cp.maximum(n_surv, 1.0) 
+            return sum_err / denom
+        
+        def calc_weighted_errors(A_sum, B_sum):
+            A_exp = A_sum[:, :, 0]
+            B_exp = B_sum[:, :, 0]
+            A_clk = A_sum[:, :, 1]
+            B_clk = B_sum[:, :, 1]
+            
+            A_ctr = (A_clk / (A_exp + 1e-9)) * 100.0
+            B_ctr = (B_clk / (B_exp + 1e-9)) * 100.0
+            
+            diff_exp = cp.abs(A_exp - B_exp)
+            avg_exp  = (A_exp + B_exp) / 2.0
+            err_exp  = diff_exp / (avg_exp + 1e-9)
+            
+            diff_ctr = cp.abs(A_ctr - B_ctr)
+            avg_ctr  = (A_ctr + B_ctr) / 2.0
+            err_ctr  = diff_ctr / (avg_ctr + 1e-9)
+            
+            return err_exp, err_ctr, A_ctr, B_ctr
+
+
+        ##### [💧 3-5-3. 배치 루프 실행]: 랜덤 마스킹 및 통계 연산 반복
+        for chunk_i in range(n_chunks):
+            
+            ####### [📌 3-5-3-1. 진행률 출력]: 배치 진행 상태 시각적 확인
+            progress_pct = (chunk_i + 1) / n_chunks * 100
+
+            sys.stdout.write(f"\r   - 진행률: {progress_pct:5.1f}% (배치 {chunk_i + 1}/{n_chunks})")
+            sys.stdout.flush()
+            
+
+            ####### [📌 3-5-3-2. Pair-Matching 랜덤 마스크 생성]: (BATCH, 60, 2)
+            pair_decisions = cp.random.randint(0, 2, size= (BATCH_SIZE, 60, 1), dtype= cp.int8).astype(cp.float32)
+            
+            mem0_mask  = 1.0 - pair_decisions
+            mem1_mask  = pair_decisions
+            masks_pair = cp.concatenate([mem0_mask, mem1_mask], axis= 2)
+            full_masks = masks_pair.reshape(BATCH_SIZE, 120)
+            
+            reordered_flat = reordered_tensor.reshape(120, total_weeks_idx, 2)
+            
+
+            ####### [📌 3-5-3-3. 그룹별 통계 집계]: 행렬 곱(MatMul)
+            A_stats_raw = cp.matmul(full_masks, reordered_flat.reshape(120, -1)).reshape(BATCH_SIZE, total_weeks_idx, 2)
+            
+
+            ####### [📌 3-5-3-4. 누적 통계 변환]: 1주, 1+2주... 누적(Cumulative) 데이터로 변환
+            A_past_raw   = A_stats_raw[:, :ANALYSIS_WEEKS, :]
+            A_future_raw = A_stats_raw[:, ANALYSIS_WEEKS:, :]
+            
+            A_past_cum   = cp.cumsum(A_past_raw, axis= 1)
+            A_future_cum = cp.cumsum(A_future_raw, axis= 1)
+            
+            B_past_cum   = total_past_cum - A_past_cum
+            B_future_cum = total_future_cum - A_future_cum
+            
+
+            ####### [📌 3-5-3-5. 오차율 및 CTR 계산]: 상대 오차 및 가중 CTR 적용
+            err_exp_past, err_ctr_past, A_ctr_past, B_ctr_past = calc_weighted_errors(A_past_cum, B_past_cum)
+            err_exp_fut,  err_ctr_fut,  A_ctr_fut,  B_ctr_fut  = calc_weighted_errors(A_future_cum, B_future_cum)
+
+            weighted_error_past = (err_exp_past + err_ctr_past) / 2.0
+            weighted_error_fut  = (err_exp_fut + err_ctr_fut) / 2.0
+            
+
+            ##### [💧 3-5-4. 조건별 생존 검증]: 35개 오차범위 조건에 대해 루프 수행
+            for cond_name, (tol_exp, tol_ctr) in CONDITIONS.items():
+                
+
+                ####### [📌 3-5-4-1. 오차 범위 만족 여부 마스킹]: 오차 범위 밖 조합은 제외
+                pass_past   = (err_exp_past <= tol_exp) & (err_ctr_past <= tol_ctr)
+                pass_future = (err_exp_fut <= tol_exp)  & (err_ctr_fut <= tol_ctr)
+                
+
+                ####### [📌 3-5-4-2. 과거 생존 누적]: 누적 데이터이므로 중간에 끊기면 그 뒤도 의미 없음 (연속성 체크)
+                surv_past  = cp.cumprod(pass_past, axis= 1)
+                valid_base = surv_past[:, 0:1]
+                
+                surv_future_raw = cp.cumprod(pass_future, axis= 1)
+                surv_future     = surv_future_raw & valid_base 
+                
+                n_surv_past   = cp.sum(surv_past, axis= 1)
+                n_surv_future = cp.sum(surv_future, axis= 1)
+                
+
+                ####### [📌 3-5-4-3. 콘솔 출력용 카운터 업데이트]: print 창에 결과 출력용
+                consol_survival_decay_past[cond_name]   += cp.sum(surv_past, axis= 0).astype(cp.int32)
+                consol_survival_decay_future[cond_name] += cp.sum(surv_future, axis= 0).astype(cp.int32)
+
+
+                ####### [📌 3-5-4-4. 최적해 탐색]: 생존형(Survival), 최적화형(Optimization), 정확도형(Accuracy) 선정
+                if cond_name not in plat_best_results:
+                    plat_best_results[cond_name] = {'SURVIVAL':     {'max_w': -1, 'min_err': 999.0, 'vals': None},
+                                                    'OPTIMIZATION': {'min_err': 999.0, 'vals': None},
+                                                    'ACCURACY':     {'min_err': 999.0, 'vals': None}}
+                
+
+                ##### [💧 3-5-5. 타입 1: 생존형 (SURVIVAL)] - 전체 기간 생존
+                valid_surv = (n_surv_past == ANALYSIS_WEEKS) & (n_surv_future == ANALYSIS_WEEKS)
+
+
+                ####### [📌 3-5-5-1. 후보군 선정]: 전체 기간 생존 그룹 대상 오차율 계산 및 최적 후보 탐색
+                if cp.any(valid_surv):
+                    cands = cp.where(valid_surv)[0]
+                    
+                    start_surv_mask = surv_future[cands]
+                    test_errs_cands = calc_valid_mean_err(weighted_error_fut[cands], start_surv_mask, n_surv_future[cands])
+                    
+                    local_best_i    = cp.argmin(test_errs_cands)
+                    best_cand_err   = test_errs_cands[local_best_i].item()
+
+
+                    ####### [📌 3-5-5-2. 최적해 갱신]: 현재 조건의 최소 오차보다 작을 경우 결과 업데이트
+                    if best_cand_err < plat_best_results[cond_name]['SURVIVAL']['min_err']:
+                        best_cand_idx = cands[local_best_i]
+                        
+                        mask_f = surv_future[best_cand_idx:best_cand_idx+1]
+                        n_f    = n_surv_future[best_cand_idx:best_cand_idx+1]
+                        
+                        val_exp_err = calc_valid_mean_err(err_exp_fut[best_cand_idx:best_cand_idx+1], mask_f, n_f).item()
+                        val_ctr_err = calc_valid_mean_err(err_ctr_fut[best_cand_idx:best_cand_idx+1], mask_f, n_f).item()
+
+                        
+                        ####### [📌 3-5-5-3. 절대 지표 저장]: 미래 구간 노출수 및 CTR 합계 저장
+                        idx_in_batch        = best_cand_idx
+                        a_exp_future_final  = A_future_cum[idx_in_batch, ANALYSIS_WEEKS-1, 0].item()
+                        b_exp_future_final  = B_future_cum[idx_in_batch, ANALYSIS_WEEKS-1, 0].item()
+                        a_ctr_future_final  = A_ctr_fut[idx_in_batch, ANALYSIS_WEEKS-1].item()
+                        b_ctr_future_final  = B_ctr_fut[idx_in_batch, ANALYSIS_WEEKS-1].item()
+
+                        
+                        ####### [📌 3-5-5-4. 트렌드 분석]: 노출 및 CTR의 주차별 우세 빈도 계산
+                        a_exp_fut_trace = A_future_cum[idx_in_batch, :, 0]
+                        b_exp_fut_trace = B_future_cum[idx_in_batch, :, 0]
+                        a_ctr_fut_trace = A_ctr_fut[idx_in_batch, :]
+                        b_ctr_fut_trace = B_ctr_fut[idx_in_batch, :]
+                        
+                        exp_dom = cp.sum(a_exp_fut_trace > b_exp_fut_trace).item()
+                        ctr_dom = cp.sum(a_ctr_fut_trace > b_ctr_fut_trace).item()
+
+                        
+                        ####### [📌 3-5-5-5. 결과 저장]: 정렬된 마스크를 원본 순서로 복원하여 딕셔너리에 저장
+                        sorted_mask           = full_masks[idx_in_batch].astype(cp.int8)
+                        original_order_mask = cp.zeros(120, dtype=cp.int8)
+                        flat_sorted_indices = pairs_indices.flatten() 
+                        original_order_mask[flat_sorted_indices] = sorted_mask
+
+                        plat_best_results[cond_name]['SURVIVAL'] = {'max_w'   : ANALYSIS_WEEKS * 2, 
+                                                                    'min_err' : best_cand_err,
+                                                                    'vals'    : {'past_w': n_surv_past[best_cand_idx].item(),
+                                                                                 'fut_w': n_surv_future[best_cand_idx].item(),
+                                                                                 'mask': original_order_mask.copy(),
+                                                                                 'exp_err': val_exp_err,
+                                                                                 'ctr_err': val_ctr_err,
+                                                                                 'abs_stats': (a_exp_future_final, b_exp_future_final, a_ctr_future_final, b_ctr_future_final),
+                                                                                 'trend_stats': (exp_dom, ctr_dom)}}
+
+
+                ##### [💧 3-5-6. 타입 2: 최적화형 (OPTIMIZATION)] - 절반 이상 생존 중 최소 오차
+                half_weeks      = max(1, ANALYSIS_WEEKS // 2)
+                valid_opt_basic = (n_surv_past >= half_weeks) & (n_surv_future >= half_weeks)
+                
+                exclude_condition = valid_surv | ((n_surv_past == 1) & (n_surv_future == 1))
+                valid_opt_final   = valid_opt_basic & (~exclude_condition)
+
+
+                ####### [📌 3-5-6-1. 후보군 선정]: 최소 생존 주차 만족 그룹 대상 오차율 계산 및 최적 후보 탐색
+                if cp.any(valid_opt_final):
+                    cands_opt = cp.where(valid_opt_final)[0]
+                    
+                    mask_opt_cands = surv_future[cands_opt]
+                    test_errs_opt  = calc_valid_mean_err(weighted_error_fut[cands_opt], mask_opt_cands, n_surv_future[cands_opt])
+                    
+                    local_best_i_opt = cp.argmin(test_errs_opt)
+                    best_opt_err     = test_errs_opt[local_best_i_opt].item()
+                    
+                    if best_opt_err < plat_best_results[cond_name]['OPTIMIZATION']['min_err']:
+                        idx_opt = cands_opt[local_best_i_opt]
+                        
+                        mask_f = surv_future[idx_opt:idx_opt+1]
+                        n_f    = n_surv_future[idx_opt:idx_opt+1]
+                        
+                        val_exp_err = calc_valid_mean_err(err_exp_fut[idx_opt:idx_opt+1], mask_f, n_f).item()
+                        val_ctr_err = calc_valid_mean_err(err_ctr_fut[idx_opt:idx_opt+1], mask_f, n_f).item()
+
+
+                        ####### [📌 3-5-6-2. 절대 지표 저장]: 미래 구간 노출수 및 CTR 합계 저장
+                        a_exp_future_final = A_future_cum[idx_opt, ANALYSIS_WEEKS-1, 0].item()
+                        b_exp_future_final = B_future_cum[idx_opt, ANALYSIS_WEEKS-1, 0].item()
+                        a_ctr_future_final = A_ctr_fut[idx_opt, ANALYSIS_WEEKS-1].item()
+                        b_ctr_future_final = B_ctr_fut[idx_opt, ANALYSIS_WEEKS-1].item()
+
+                        
+                        ####### [📌 3-5-6-3. 트렌드 분석]: 노출 및 CTR의 주차별 우세 빈도 계산
+                        a_exp_fut_trace = A_future_cum[idx_opt, :, 0]
+                        b_exp_fut_trace = B_future_cum[idx_opt, :, 0]
+                        a_ctr_fut_trace = A_ctr_fut[idx_opt, :]
+                        b_ctr_fut_trace = B_ctr_fut[idx_opt, :]
+                        
+                        exp_dom = cp.sum(a_exp_fut_trace > b_exp_fut_trace).item()
+                        ctr_dom = cp.sum(a_ctr_fut_trace > b_ctr_fut_trace).item()
+
+                        
+                        ####### [📌 3-5-6-4. 결과 저장]: 정렬된 마스크를 원본 순서로 복원하여 딕셔너리에 저장
+                        sorted_mask           = full_masks[idx_opt].astype(cp.int8)
+                        original_order_mask = cp.zeros(120, dtype=cp.int8)
+                        flat_sorted_indices = pairs_indices.flatten() 
+                        original_order_mask[flat_sorted_indices] = sorted_mask
+
+                        plat_best_results[cond_name]['OPTIMIZATION'] = {'min_err' : best_opt_err,
+                                                                        'vals'    : {'past_w': n_surv_past[idx_opt].item(),
+                                                                                     'fut_w': n_surv_future[idx_opt].item(),
+                                                                                     'mask': original_order_mask.copy(),
+                                                                                     'exp_err': val_exp_err,
+                                                                                     'ctr_err': val_ctr_err,
+                                                                                     'abs_stats': (a_exp_future_final, b_exp_future_final, a_ctr_future_final, b_ctr_future_final),
+                                                                                     'trend_stats': (exp_dom, ctr_dom)}}
+
+
+                ##### [💧 3-5-7. 타입 3: 정확도형 (ACCURACY)] - 최소 1주 생존 중 최소 오차
+                valid_acc = (n_surv_past >= 1) & (n_surv_future >= 1)
+
+
+                ####### [📌 3-5-7-1. 후보군 선정]: 최소 1주 생존 그룹 대상 오차율 계산 및 최적 후보 탐색
+                if cp.any(valid_acc):
+                    cands_acc = cp.where(valid_acc)[0]
+                    
+                    mask_acc_cands = surv_future[cands_acc]
+                    test_errs_acc  = calc_valid_mean_err(weighted_error_fut[cands_acc], mask_acc_cands, n_surv_future[cands_acc])
+                    
+                    local_best_i_acc = cp.argmin(test_errs_acc)
+                    best_acc_err     = test_errs_acc[local_best_i_acc].item()
+
+
+                    ####### [📌 3-5-7-2. 최적해 갱신]: 현재 조건의 최소 오차보다 작을 경우 검증 및 지표 계산
+                    if best_acc_err < plat_best_results[cond_name]['ACCURACY']['min_err']:
+                        idx_acc = cands_acc[local_best_i_acc]
+                        
+                        mask_f = surv_future[idx_acc:idx_acc+1]
+                        n_f    = n_surv_future[idx_acc:idx_acc+1]
+                        
+                        val_exp_err = calc_valid_mean_err(err_exp_fut[idx_acc:idx_acc+1], mask_f, n_f).item()
+                        val_ctr_err = calc_valid_mean_err(err_ctr_fut[idx_acc:idx_acc+1], mask_f, n_f).item()
+                        
+
+                        ####### [📌 3-5-7-3. 절대 지표 저장]: 미래 구간 노출수 및 CTR 합계 저장
+                        a_exp_future_final = A_future_cum[idx_acc, ANALYSIS_WEEKS-1, 0].item()
+                        b_exp_future_final = B_future_cum[idx_acc, ANALYSIS_WEEKS-1, 0].item()
+                        a_ctr_future_final = A_ctr_fut[idx_acc, ANALYSIS_WEEKS-1].item()
+                        b_ctr_future_final = B_ctr_fut[idx_acc, ANALYSIS_WEEKS-1].item()
+
+                        
+                        ####### [📌 3-5-7-4. 트렌드 분석]: 노출 및 CTR의 주차별 우세 빈도 계산
+                        a_exp_fut_trace = A_future_cum[idx_acc, :, 0]
+                        b_exp_fut_trace = B_future_cum[idx_acc, :, 0]
+                        a_ctr_fut_trace = A_ctr_fut[idx_acc, :]
+                        b_ctr_fut_trace = B_ctr_fut[idx_acc, :]
+                        
+                        exp_dom = cp.sum(a_exp_fut_trace > b_exp_fut_trace).item()
+                        ctr_dom = cp.sum(a_ctr_fut_trace > b_ctr_fut_trace).item()
+
+                        
+                        ####### [📌 3-5-7-5. 결과 저장]: 정렬된 마스크를 원본 순서로 복원하여 딕셔너리에 저장
+                        sorted_mask           = full_masks[idx_acc].astype(cp.int8)
+                        original_order_mask = cp.zeros(120, dtype=cp.int8)
+                        flat_sorted_indices = pairs_indices.flatten() 
+                        original_order_mask[flat_sorted_indices] = sorted_mask
+
+                        plat_best_results[cond_name]['ACCURACY'] = {'min_err' : best_acc_err,
+                                                                    'vals'    : {'past_w': n_surv_past[idx_acc].item(),
+                                                                                 'fut_w': n_surv_future[idx_acc].item(),
+                                                                                 'mask': original_order_mask.copy(),
+                                                                                 'exp_err': val_exp_err,
+                                                                                 'ctr_err': val_ctr_err,
+                                                                                 'abs_stats': (a_exp_future_final, b_exp_future_final, a_ctr_future_final, b_ctr_future_final),
+                                                                                 'trend_stats': (exp_dom, ctr_dom)}}
+
+
+        ############################################################################################################################################################################################
+        ### [☀️ 3-6. 시뮬레이션 결과]: 콘솔 리포팅 및 결과 데이터 취합
+        ############################################################################################################################################################################################
+        
+        
+        ##### [💧 3-6-1. 리포트 1) 생존 감쇠 테이블 출력]: 과거(Train) 생존 감쇠 테이블
+        print(f'\n============================================================================================================================================')
+        print(f'  [Report] {("PC" if platform == "01" else "모바일(MW)")} Platform : PAST (Train) Survival Decay Table')
+        print(f'============================================================================================================================================')
+        print(f'  {"Condition Name (Code)":<35} | ' + ' '.join([f"{i+1}w".center(8) for i in range(ANALYSIS_WEEKS)]))
+        print(f'  -' + '-'*110)
+        
+        for cond_name in CONDITIONS:
+            exp_tol, ctr_tol = CONDITIONS[cond_name]
+            counts    = consol_survival_decay_past[cond_name].tolist()
+            count_str = ' '.join([fmt_cnt(c).center(8) for c in counts])
+            cond_desc = f"{cond_name} | Exp ±{exp_tol*100:.2f}%, CTR ±{ctr_tol*100:.2f}%"
+            print(f'  {cond_desc:<35} | {count_str}')
+
+
+        ##### [💧 3-6-2. 리포트 2) 생존 감쇠 테이블 출력]: 미래(Test) 생존 감쇠 테이블
+        print(f'\n============================================================================================================================================')
+        print(f'  [Report] {("PC" if platform == "01" else "모바일(MW)")} Platform : FUTURE (Test) Survival Decay Table')
+        print(f'============================================================================================================================================')
+        print(f'  {"Condition Name (Code)":<35} | ' + ' '.join([f"{i+1}w".center(8) for i in range(ANALYSIS_WEEKS)]))
+        print(f'  -' + '-'*110)
+        
+        for cond_name in CONDITIONS:
+            exp_tol, ctr_tol = CONDITIONS[cond_name]
+            counts    = consol_survival_decay_future[cond_name].tolist()
+            count_str = ' '.join([fmt_cnt(c).center(8) for c in counts])
+            cond_desc = f"{cond_name} | Exp ±{exp_tol*100:.2f}%, CTR ±{ctr_tol*100:.2f}%"
+            print(f'  {cond_desc:<35} | {count_str}')
+            
+        print(f'============================================================================================================================================\n')
+
+
+        ##### [💧 3-6-3. 최종 결과 변환]: 최적해 딕셔너리를 리스트 형태로 변환하여 저장
+        for cond_name, res_types in plat_best_results.items():
+            exp_tol, ctr_tol = CONDITIONS[cond_name]
+
+
+            ####### [📌 3-6-3-1. 유형별 순회]: 생존형, 최적화형, 정확도형 결과 데이터 접근
+            for r_type in ['SURVIVAL', 'OPTIMIZATION', 'ACCURACY']:
+                dataset = res_types[r_type]
+                vals    = dataset['vals']
+                
+                str_exp_tol = f"{exp_tol*100:.2f}%"
+                str_ctr_tol = f"{ctr_tol*100:.2f}%"
+
+
+                ####### [📌 3-6-3-2. 데이터 포맷팅]: 결과 존재 여부에 따라 출력 포맷 변환 및 리스트 추가
+                if vals is not None:
+                    best_mask = vals['mask']
+                    grp_A     = [i for i, x in enumerate(best_mask.tolist()) if x == 1]
+                    grp_B     = [i for i, x in enumerate(best_mask.tolist()) if x == 0]
+                    
+                    val_exp_err_pct = vals['exp_err'] * 100
+                    val_ctr_err_pct = vals['ctr_err'] * 100
+                    str_exp_err     = f"{val_exp_err_pct:.4f}%"
+                    str_ctr_err     = f"{val_ctr_err_pct:.4f}%"
+                    
+                    abs_stats   = vals.get('abs_stats', (0,0,0,0))                    
+                    trend_stats = vals.get('trend_stats', (0, 0)) # (Exp_A_Dominance, CTR_A_Dominance)
+
+                    row = {'조건': cond_name,
+                           '노출_오차범위': str_exp_tol,
+                           'CTR_오차범위': str_ctr_tol,
+                           '디바이스': ('PC' if platform == '01' else 'MW'),
+                           '타입': r_type,
+                           'A군': str(grp_A),
+                           'B군': str(grp_B),
+                           '노출_실제오차': str_exp_err,
+                           'CTR_실제오차': str_ctr_err,
+                           'A군_노출합계(미래)': int(abs_stats[0]),
+                           'B군_노출합계(미래)': int(abs_stats[1]),
+                           'A군_CTR(미래)': f"{abs_stats[2]:.4f}%",
+                           'B군_CTR(미래)': f"{abs_stats[3]:.4f}%",
+                           '노출_A우세_주차수': f"{trend_stats[0]} / {ANALYSIS_WEEKS}",
+                           'CTR_A우세_주차수': f"{trend_stats[1]} / {ANALYSIS_WEEKS}",
+                           '과거생존_WEEK': str(int(vals['past_w'])),
+                           '미래생존_WEEK': str(int(vals['fut_w']))}
+                    
+                    final_results.append(row)
+
+                else:
+                    row = {'조건': cond_name,
+                           '노출_오차범위': str_exp_tol,
+                           'CTR_오차범위': str_ctr_tol,
+                           '디바이스': ('PC' if platform == '01' else 'MW'),
+                           '타입': r_type,
+                           'A군': None,
+                           'B군': None,
+                           '노출_실제오차': None,
+                           'CTR_실제오차': None,
+                           '과거생존_WEEK': None,
+                           '미래생존_WEEK': None}
+
+                    final_results.append(row)
+
+
+    ############################################################################################################################################################################################
+    ### [☀️ 3-7. 결과 저장]: 데이터프레임 생성 및 CSV 저장
+    ############################################################################################################################################################################################
+
+
+    ##### [💧 3-7-1. 데이터프레임 생성]: 결과 리스트를 데이터프레임으로 변환 및 정렬
+    df_final   = pd.DataFrame(final_results)
+    cols_order = ['조건', '노출_오차범위', 'CTR_오차범위', '디바이스', '타입', 'A군', 'B군',
+                  'A군_노출합계(미래)', 'B군_노출합계(미래)', 'A군_CTR(미래)', 'B군_CTR(미래)',
+                  '노출_실제오차', 'CTR_실제오차', '노출_A우세_주차수', 'CTR_A우세_주차수', '과거생존_WEEK', '미래생존_WEEK']
+    
+    valid_cols = [c for c in cols_order if c in df_final.columns]
+    df_final   = df_final[valid_cols]
+    df_final   = df_final.sort_values(by= ['디바이스', '조건', '타입'])
+
+
+    ##### [💧 3-7-2. 파일 저장]: 최종 결과를 CSV 파일로 저장
+    save_date = datetime.now(seoul).strftime('%Y%m%d')
+    filename  = f"AB_Test_Results_{save_date}.xlsx"
+    df_final.to_excel(filename, index=False)
+
+
+    # [⏰ LOGGING 3]: 작업 시간 로깅
+    end_time = datetime.now(seoul)
+    duration = end_time - start_time
+
+    print(f'\n[🔥 TIME LOG (End)] 모든 작업이 완료되었습니다.')
+    print(f'   - 총 소요 시간: {duration}')
+    print(f'   - 저장 완료: {filename}')
+
+
+################################################################################################################################################################################################
+# [🔥 4. 메인 실행]: Python 스크립트 직접 실행 시 메인 함수 호출
+################################################################################################################################################################################################
+
+
+if __name__ == '__main__':
+    main()</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- RESULT MODAL -->
+    <div id="resultModal" class="modal-overlay">
+        <div class="modal-content">
+            <!-- Sidebar -->
+            <div id="pcSidebar" class="modal-sidebar">
+                <div class="sidebar-title">ANALYSIS CONTEXT</div>
+                <div class="sidebar-info-group"><label>Simulation Date</label><span>2026-01-20</span></div>
+                <div class="sidebar-info-group"><label>Data Limit</label><span style="font-size: 0.95rem; color: #555;">2025-07-01</span></div>
+                <div class="sidebar-info-group"><label>Past Period (8w)</label><span>25.09.30 ~ 25.11.24</span></div>
+                <div class="sidebar-info-group"><label>Future Period (8w)</label><span>25.11.25 ~ 26.01.19</span></div>
+                <div class="sidebar-info-group" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 20px;">
+                    <label>Target Device</label><span id="sidebarPlatform">PC</span>
+                </div>
+            </div>
+            <!-- Main Panel -->
+            <div id="modalRightPanel" class="modal-right-panel">
+                <div class="modal-header">
+                    <div class="modal-title" id="modalTitle">Platform Result Detail</div>
+                    <button class="close-btn" onclick="closeModal()">×</button>
+                </div>
+                <div class="modal-body-carousel">
+                    <div class="carousel-track" id="carouselTrack">
+                        <!-- Slide 1 -->
+                        <div class="carousel-slide">
+                            <div class="slide-header"><h3>PAST PERFORMANCE</h3><br></div>
+                            <div class="table-container-scroll">
+                                <table id="pastTable" class="data-table">
+                                    <thead><tr><th>Condition</th><th>EPRS_Limit</th><th>CTR_Limit</th><th>1w</th><th>2w</th><th>3w</th><th>4w</th><th>5w</th><th>6w</th><th>7w</th><th>8w</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- Slide 2 -->
+                        <div class="carousel-slide">
+                            <div class="slide-header"><h3>FUTURE PERFORMANCE</h3><br></div>
+                            <div class="table-container-scroll">
+                                <table id="futureTable" class="data-table">
+                                    <thead><tr><th>Condition</th><th>EPRS_Limit</th><th>CTR_Limit</th><th>1w</th><th>2w</th><th>3w</th><th>4w</th><th>5w</th><th>6w</th><th>7w</th><th>8w</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <!-- Slide 3 -->
+                        <div class="carousel-slide">
+                            <div class="slide-header"><h3>STRATEGY BY PURPOSE</h3><br></div>
+                            <div class="table-container-scroll">
+                                <table id="survivalTable" class="data-table">
+                                    <thead><tr><th>Condition</th><th style="width: 100px;">Type</th><th>Exp_Tol</th><th>CTR_Tol</th><th>Exp_Err</th><th>CTR_Err</th><th>Past_W</th><th>Future_W</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="carousel-nav">
+                    <button class="nav-dot active" onclick="goToSlide(0)"></button>
+                    <button class="nav-dot" onclick="goToSlide(1)"></button>
+                    <button class="nav-dot" onclick="goToSlide(2)"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /** 1. CONFIG & GLOBALS */
+        const EXP_TOLS = [0.01, 0.02, 0.03, 0.04, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.75, 1.00];
+        const CTR_TOLS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0];
+        const CONDITIONS = [];
+        let currentPlatform = 'PC', currentSlide = 0, c_idx = 1;
+
+        // Init Conditions
+        EXP_TOLS.forEach(e => { CTR_TOLS.forEach(c => { CONDITIONS.push({ id: `C${String(c_idx).padStart(3, '0')}`, exp: `±${e.toFixed(2)}%`, ctr: `±${c.toFixed(1)}%` }); c_idx++; }); });
+
+        // DUMMY DATA (Requested)
+        const PC_DATA = { past: [[589, 0, 0, 0, 0, 0, 0, 0], [1154, 3, 0, 0, 0, 0, 0, 0], [1741, 9, 0, 0, 0, 0, 0, 0], [2350, 13, 0, 0, 0, 0, 0, 0], [2939, 20, 0, 0, 0, 0, 0, 0], [4384, 35, 0, 0, 0, 0, 0, 0], [5674, 51, 0, 0, 0, 0, 0, 0], [1182, 3, 1, 0, 0, 0, 0, 0], [2355, 10, 1, 0, 0, 0, 0, 0], [3576, 25, 1, 0, 0, 0, 0, 0], [4764, 46, 1, 0, 0, 0, 0, 0], [5941, 68, 1, 0, 0, 0, 0, 0], [8801, 130, 2, 1, 0, 0, 0, 0], [11349, 194, 5, 1, 0, 0, 0, 0], [1818, 6, 1, 0, 0, 0, 0, 0], [3597, 32, 2, 0, 0, 0, 0, 0], [5393, 65, 3, 1, 0, 0, 0, 0], [7175, 110, 4, 1, 0, 0, 0, 0], [8964, 166, 5, 2, 0, 0, 0, 0], [13222, 310, 9, 4, 0, 0, 0, 0], [17139, 461, 18, 6, 0, 0, 0, 0], [2418, 13, 1, 0, 0, 0, 0, 0], [4796, 57, 4, 0, 0, 0, 0, 0], [7171, 116, 5, 1, 0, 0, 0, 0], [9499, 208, 10, 1, 0, 0, 0, 0], [11896, 304, 14, 2, 0, 0, 0, 0], [17563, 578, 32, 6, 1, 0, 0, 0], [22781, 842, 50, 10, 2, 0, 0, 0], [3089, 19, 1, 0, 0, 0, 0, 0], [6122, 101, 6, 0, 0, 0, 0, 0], [9098, 202, 11, 2, 1, 0, 0, 0], [12006, 361, 26, 3, 2, 0, 0, 0], [14967, 526, 40, 7, 3, 1, 0, 0], [22099, 956, 82, 20, 6, 2, 0, 0], [28655, 1355, 118, 30, 9, 2, 0, 0], [6217, 92, 2, 0, 0, 0, 0, 0], [12259, 365, 32, 5, 0, 0, 0, 0], [18277, 812, 94, 26, 11, 2, 0, 0], [24176, 1438, 200, 59, 22, 6, 1, 1], [30117, 2099, 330, 102, 40, 12, 5, 3], [44360, 3746, 691, 252, 107, 40, 17, 13], [57405, 5400, 1026, 403, 178, 66, 26, 17], [9260, 212, 8, 0, 0, 0, 0, 0], [18258, 870, 99, 29, 8, 2, 1, 1], [27277, 1914, 307, 116, 50, 18, 4, 2], [36187, 3301, 639, 281, 126, 49, 23, 19], [44934, 4700, 1019, 458, 212, 95, 49, 34], [66252, 8419, 2124, 1063, 514, 249, 128, 87], [85886, 12202, 3301, 1692, 851, 422, 210, 144], [12356, 428, 39, 5, 0, 0, 0, 0], [24376, 1609, 242, 85, 27, 8, 4, 4], [36449, 3521, 705, 292, 130, 54, 17, 11], [48386, 5962, 1455, 681, 327, 142, 69, 52], [60140, 8448, 2284, 1129, 591, 286, 140, 105], [88593, 15131, 4777, 2653, 1482, 835, 448, 322], [114843, 21677, 7470, 4292, 2518, 1469, 814, 585], [15392, 679, 69, 14, 2, 1, 0, 0], [30510, 2573, 444, 175, 65, 23, 5, 5], [45653, 5561, 1302, 584, 273, 125, 47, 31], [60597, 9260, 2631, 1321, 671, 335, 158, 106], [75368, 13225, 4215, 2291, 1289, 723, 354, 260], [110796, 23673, 8774, 5286, 3252, 2041, 1170, 886], [143572, 33918, 13613, 8519, 5490, 3545, 2155, 1672], [18454, 993, 113, 26, 4, 1, 0, 0], [36552, 3784, 721, 277, 102, 38, 7, 6], [54764, 8065, 2113, 978, 472, 242, 92, 59], [72679, 13322, 4210, 2217, 1178, 652, 313, 216], [90395, 19053, 6785, 3848, 2261, 1371, 736, 538], [132996, 34053, 14096, 8880, 5812, 3873, 2383, 1853], [172326, 48752, 21881, 14392, 9906, 6851, 4505, 3613], [21513, 1334, 151, 32, 7, 3, 1, 1], [42640, 5108, 1041, 391, 156, 65, 17, 10], [63820, 10831, 3094, 1498, 739, 398, 166, 105], [84686, 17963, 6136, 3406, 1873, 1095, 543, 374], [105400, 25892, 9904, 5864, 3558, 2267, 1293, 935], [155028, 46245, 20737, 13508, 9186, 6427, 4247, 3356], [200811, 65949, 32149, 21943, 15814, 11522, 8148, 6702], [24682, 1732, 218, 45, 9, 3, 1, 1], [48903, 6637, 1452, 541, 215, 89, 29, 17], [73119, 14048, 4266, 2122, 1071, 577, 269, 170], [96918, 23210, 8431, 4794, 2715, 1627, 867, 603], [120482, 33347, 13619, 8269, 5185, 3381, 2025, 1516], [177023, 59785, 28631, 19146, 13478, 9729, 6679, 5391], [229292, 85192, 44249, 31083, 23066, 17461, 12760, 10748], [27743, 2142, 279, 55, 10, 3, 1, 1], [55028, 8269, 1932, 740, 289, 127, 38, 24], [82321, 17532, 5634, 2861, 1441, 768, 369, 241], [109047, 28885, 11086, 6444, 3725, 2232, 1246, 857], [135459, 41486, 17897, 11131, 7078, 4695, 2937, 2198], [199024, 74454, 37596, 25715, 18432, 13633, 9730, 7935], [257702, 106004, 58066, 41674, 31457, 24457, 18539, 15863], [30749, 2582, 359, 77, 14, 4, 1, 1], [61054, 10046, 2474, 994, 379, 167, 57, 33], [91384, 21175, 7188, 3744, 1911, 1049, 519, 337], [121031, 34974, 14101, 8385, 4949, 3005, 1709, 1206], [150421, 50105, 22712, 14471, 9369, 6283, 4000, 3030], [220913, 89932, 47593, 33332, 24293, 18271, 13308, 10994], [286058, 128026, 73465, 53870, 41339, 32735, 25378, 21915], [45868, 4976, 809, 179, 44, 10, 3, 1], [91313, 19372, 5845, 2544, 1023, 475, 180, 116], [136499, 41015, 16751, 9405, 4977, 2818, 1462, 986], [181000, 67750, 33042, 21061, 13039, 8439, 5073, 3696], [224790, 97049, 53008, 36357, 24655, 17504, 11684, 9014], [330245, 174452, 111107, 84073, 64189, 50745, 39233, 33312], [427423, 248302, 171119, 135657, 109233, 91285, 75393, 66925], [60962, 7216, 1319, 323, 76, 19, 4, 2], [121474, 28285, 9673, 4468, 1859, 837, 328, 196], [181304, 60109, 27939, 16691, 9102, 5194, 2688, 1809], [240571, 99469, 55013, 37313, 23791, 15583, 9463, 6982], [298842, 142914, 88352, 64615, 45406, 32726, 22104, 17242], [438565, 258169, 185426, 149517, 118439, 95607, 75003, 64414], [567200, 368284, 284856, 241156, 201428, 172282, 144866, 130045]], future: [[0, 0, 0, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0], [3, 0, 0, 0, 0, 0, 0, 0], [5, 0, 0, 0, 0, 0, 0, 0], [13, 0, 0, 0, 0, 0, 0, 0], [22, 1, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0], [3, 1, 0, 0, 0, 0, 0, 0], [6, 1, 0, 0, 0, 0, 0, 0], [17, 1, 0, 0, 0, 0, 0, 0], [29, 1, 0, 0, 0, 0, 0, 0], [55, 2, 0, 0, 0, 0, 0, 0], [90, 4, 0, 0, 0, 0, 0, 0], [3, 0, 0, 0, 0, 0, 0, 0], [14, 1, 0, 0, 0, 0, 0, 0], [22, 1, 0, 0, 0, 0, 0, 0], [43, 2, 0, 0, 0, 0, 0, 0], [71, 3, 0, 0, 0, 0, 0, 0], [142, 6, 0, 0, 0, 0, 0, 0], [217, 13, 0, 0, 0, 0, 0, 0], [5, 0, 0, 0, 0, 0, 0, 0], [26, 1, 0, 0, 0, 0, 0, 0], [46, 4, 0, 0, 0, 0, 0, 0], [81, 6, 0, 0, 0, 0, 0, 0], [124, 7, 0, 0, 0, 0, 0, 0], [258, 20, 1, 0, 0, 0, 0, 0], [384, 31, 2, 0, 0, 0, 0, 0], [9, 0, 0, 0, 0, 0, 0, 0], [37, 2, 0, 0, 0, 0, 0, 0], [72, 6, 0, 0, 0, 0, 0, 0], [121, 10, 0, 0, 0, 0, 0, 0], [188, 14, 0, 0, 0, 0, 0, 0], [378, 35, 2, 0, 0, 0, 0, 0], [577, 57, 5, 1, 0, 0, 0, 0], [30, 0, 0, 0, 0, 0, 0, 0], [125, 8, 1, 0, 0, 0, 0, 0], [257, 21, 3, 2, 0, 0, 0, 0], [431, 44, 6, 2, 0, 0, 0, 0], [689, 81, 9, 3, 0, 0, 0, 0], [1422, 198, 24, 8, 0, 0, 0, 0], [2311, 331, 48, 16, 0, 0, 0, 0], [64, 1, 0, 0, 0, 0, 0, 0], [257, 22, 3, 0, 0, 0, 0, 0], [563, 62, 11, 5, 0, 0, 0, 0], [979, 122, 21, 11, 1, 0, 0, 0], [1522, 231, 42, 19, 2, 0, 0, 0], [3175, 611, 121, 52, 4, 1, 0, 0], [5070, 1055, 212, 93, 9, 2, 0, 0], [113, 4, 0, 0, 0, 0, 0, 0], [468, 48, 6, 4, 0, 0, 0, 0], [1037, 142, 22, 14, 2, 1, 1, 0], [1774, 297, 55, 32, 3, 1, 1, 0], [2726, 548, 113, 61, 8, 2, 1, 0], [5648, 1426, 337, 161, 17, 8, 4, 2], [8962, 2492, 636, 334, 57, 26, 9, 3], [176, 11, 0, 0, 0, 0, 0, 0], [711, 84, 8, 7, 0, 0, 0, 0], [1581, 256, 46, 25, 5, 3, 2, 1], [2753, 558, 132, 71, 17, 10, 6, 2], [4198, 997, 251, 137, 30, 16, 10, 2], [8633, 2667, 782, 434, 106, 48, 30, 11], [13780, 4701, 1462, 843, 212, 106, 60, 22], [247, 17, 0, 0, 0, 0, 0, 0], [1012, 130, 15, 11, 1, 1, 1, 1], [2254, 409, 81, 43, 11, 6, 4, 4], [3937, 932, 240, 121, 36, 18, 14, 7], [6010, 1647, 478, 252, 74, 40, 30, 11], [12379, 4396, 1475, 838, 290, 146, 104, 53], [19758, 7852, 2842, 1675, 588, 295, 186, 91], [339, 24, 1, 0, 0, 0, 0, 0], [1363, 188, 26, 18, 4, 2, 1, 1], [3001, 596, 126, 71, 22, 10, 7, 6], [5255, 1394, 386, 198, 76, 39, 26, 16], [8065, 2499, 801, 426, 172, 87, 58, 29], [16625, 6629, 2482, 1468, 651, 359, 251, 156], [26565, 11964, 4794, 2916, 1308, 703, 480, 277], [434, 32, 3, 0, 0, 0, 0, 0], [1755, 260, 41, 24, 7, 2, 1, 1], [3903, 854, 206, 107, 40, 17, 10, 9], [6821, 1963, 606, 330, 143, 77, 49, 28], [10455, 3504, 1251, 706, 321, 167, 111, 61], [21571, 9365, 3871, 2332, 1194, 649, 476, 311], [34391, 16966, 7473, 4612, 2427, 1331, 977, 615], [542, 43, 4, 0, 0, 0, 0, 0], [2178, 343, 63, 30, 9, 5, 2, 2], [4934, 1147, 302, 157, 65, 39, 23, 16], [8569, 2602, 875, 481, 233, 144, 100, 63], [13097, 4695, 1805, 1025, 530, 308, 209, 138], [27018, 12526, 5631, 3459, 1993, 1173, 873, 628], [43064, 22674, 10830, 6874, 4081, 2412, 1786, 1291], [665, 52, 5, 0, 0, 0, 0, 0], [2684, 437, 79, 38, 11, 6, 3, 3], [6009, 1456, 400, 207, 91, 53, 35, 21], [10452, 3307, 1164, 664, 365, 229, 159, 105], [15970, 6016, 2437, 1435, 836, 503, 340, 235], [32964, 16173, 7831, 4898, 3127, 1920, 1423, 1062], [52724, 29367, 15178, 9834, 6461, 4015, 2997, 2254], [1467, 128, 13, 3, 0, 0, 0, 0], [5744, 1077, 231, 118, 47, 29, 21, 15], [12638, 3534, 1166, 645, 336, 208, 145, 104], [21917, 7964, 3372, 2085, 1351, 910, 675, 485], [33375, 14525, 7051, 4665, 3325, 2370, 1778, 1344], [69302, 39771, 23619, 16596, 13104, 9861, 7858, 6227], [110838, 73236, 47084, 34058, 28063, 21515, 17372, 14128], [2314, 205, 20, 8, 1, 0, 0, 0], [9253, 1820, 425, 224, 99, 57, 34, 21], [20464, 5985, 2154, 1293, 746, 484, 357, 255], [35603, 13492, 6168, 4127, 2867, 2042, 1616, 1221], [54419, 24923, 13206, 9377, 7099, 5384, 4327, 3418], [113208, 68902, 45119, 34180, 28680, 23378, 19779, 16487], [181938, 128565, 92129, 71971, 63300, 53343, 45770, 38982]] };
+        const MW_DATA = { past: [[3779, 15, 0, 0, 0, 0, 0, 0], [7386, 63, 1, 0, 0, 0, 0, 0], [10715, 100, 4, 0, 0, 0, 0, 0], [13746, 131, 7, 0, 0, 0, 0, 0], [16424, 173, 8, 0, 0, 0, 0, 0], [21530, 251, 11, 0, 0, 0, 0, 0], [24502, 302, 12, 1, 0, 0, 0, 0], [7365, 53, 1, 0, 0, 0, 0, 0], [14499, 229, 2, 0, 0, 0, 0, 0], [21219, 400, 10, 0, 0, 0, 0, 0], [27290, 565, 17, 0, 0, 0, 0, 0], [32650, 730, 22, 0, 0, 0, 0, 0], [42816, 1049, 34, 1, 0, 0, 0, 0], [48754, 1290, 46, 2, 0, 0, 0, 0], [10986, 118, 2, 0, 0, 0, 0, 0], [21638, 483, 18, 2, 0, 0, 0, 0], [31712, 873, 44, 4, 0, 0, 0, 0], [40899, 1283, 62, 9, 0, 0, 0, 0], [48960, 1644, 84, 11, 2, 0, 0, 0], [64249, 2377, 133, 16, 2, 0, 0, 0], [73157, 2851, 170, 24, 3, 0, 0, 0], [14599, 242, 7, 2, 0, 0, 0, 0], [28751, 883, 50, 6, 0, 0, 0, 0], [42094, 1601, 114, 13, 2, 0, 0, 0], [54266, 2299, 169, 20, 2, 0, 0, 0], [65051, 2968, 237, 31, 6, 0, 0, 0], [85423, 4227, 354, 48, 8, 1, 0, 0], [97319, 5037, 426, 62, 10, 1, 0, 0], [18251, 400, 14, 3, 0, 0, 0, 0], [35849, 1361, 93, 14, 2, 0, 0, 0], [52403, 2469, 214, 31, 7, 1, 0, 0], [67740, 3568, 318, 48, 10, 2, 0, 0], [81270, 4632, 439, 68, 15, 4, 1, 0], [106824, 6613, 675, 107, 22, 6, 2, 1], [121731, 7880, 821, 137, 29, 6, 2, 1], [36273, 1591, 145, 21, 7, 1, 0, 0], [71244, 5345, 742, 177, 46, 11, 4, 1], [104473, 9787, 1628, 417, 114, 34, 14, 5], [134964, 14270, 2586, 707, 208, 65, 24, 9], [162104, 18410, 3465, 991, 296, 89, 36, 17], [212982, 26529, 5310, 1575, 499, 159, 62, 28], [242683, 31391, 6451, 1926, 633, 205, 81, 36], [54463, 3412, 408, 89, 33, 10, 1, 1], [107081, 11706, 2349, 780, 276, 104, 42, 21], [156980, 21699, 5186, 1938, 758, 328, 151, 84], [202516, 31676, 8172, 3243, 1319, 615, 299, 173], [243245, 40789, 11003, 4467, 1855, 856, 435, 259], [319580, 58694, 16884, 7044, 3046, 1394, 721, 437], [363790, 69522, 20510, 8637, 3784, 1761, 922, 576], [72577, 5665, 835, 201, 75, 26, 7, 3], [142871, 19770, 4912, 1916, 866, 427, 210, 115], [209486, 37234, 11177, 5012, 2349, 1248, 679, 415], [270142, 54763, 17907, 8572, 4190, 2324, 1311, 842], [324451, 70840, 24368, 11972, 5971, 3325, 1969, 1314], [426355, 102520, 37625, 19122, 9832, 5497, 3311, 2235], [485553, 121846, 45947, 23731, 12409, 6968, 4230, 2910], [90323, 8312, 1358, 378, 148, 61, 15, 5], [177997, 29192, 8219, 3689, 1760, 933, 492, 291], [260883, 55452, 19282, 9929, 5073, 2942, 1761, 1141], [336601, 82352, 31565, 17256, 9418, 5673, 3543, 2458], [404222, 106959, 43349, 24382, 13652, 8319, 5422, 3898], [531725, 156031, 67744, 39539, 22775, 14095, 9424, 6854], [605978, 185933, 83066, 49168, 28750, 17885, 12054, 8873], [107521, 11084, 1960, 583, 225, 101, 31, 13], [212272, 39554, 12149, 5761, 2962, 1701, 947, 577], [311233, 75912, 29267, 16164, 9027, 5614, 3528, 2404], [401835, 113424, 48698, 28844, 17146, 11058, 7326, 5347], [482549, 148243, 67732, 41601, 25320, 16616, 11464, 8582], [635788, 217557, 106902, 68344, 43051, 28729, 20485, 15686], [725247, 260303, 131630, 85403, 54534, 36628, 26461, 20498], [124764, 14118, 2695, 838, 324, 144, 45, 17], [246308, 50610, 16710, 8385, 4425, 2648, 1479, 915], [361086, 97908, 40771, 23906, 14096, 9190, 5891, 4151], [466238, 147429, 68895, 43342, 27304, 18474, 12704, 9528], [560161, 193688, 96609, 63124, 40855, 28160, 20255, 15607], [738959, 286075, 154052, 105008, 70282, 49359, 36856, 29110], [843741, 343614, 190886, 132158, 89637, 63422, 48117, 38445], [141590, 17108, 3398, 1094, 456, 207, 66, 24], [279706, 61895, 21438, 11134, 6129, 3788, 2125, 1356], [410174, 120913, 53051, 32555, 20113, 13632, 8980, 6511], [529738, 183240, 90927, 59920, 39538, 27897, 19785, 15219], [636742, 242400, 128628, 88157, 59973, 43125, 31951, 25312], [841109, 360660, 207784, 148620, 104633, 76848, 59287, 48321], [961526, 434758, 259149, 188264, 134337, 99280, 77892, 64264], [158104, 20081, 4163, 1339, 567, 257, 79, 31], [312464, 73203, 26295, 14066, 7942, 5003, 2794, 1800], [458459, 144192, 66052, 41904, 26872, 18738, 12444, 9148], [592259, 220062, 114686, 78350, 53517, 38993, 28169, 22035], [712247, 292479, 163617, 116454, 82345, 61229, 46282, 37366], [941783, 438434, 267249, 198657, 145534, 110672, 87626, 72963], [1078000, 530713, 335061, 253153, 188109, 144061, 116175, 97859], [174157, 22990, 4830, 1588, 686, 319, 106, 46], [344260, 84374, 31167, 17056, 9845, 6322, 3589, 2342], [505241, 167371, 79316, 51553, 33996, 24292, 16353, 12067], [653077, 257065, 139187, 97695, 68644, 51355, 37634, 29660], [785786, 343290, 199970, 146484, 106716, 81680, 62807, 51321], [1041000, 518874, 330561, 253378, 191511, 149806, 121044, 102431], [1193000, 630739, 416918, 325030, 249316, 196405, 161722, 138619], [247430, 36593, 8059, 2809, 1253, 608, 209, 92], [489323, 136675, 54373, 31152, 19164, 13026, 7507, 4976], [719238, 277355, 144107, 99577, 70641, 53867, 37570, 28387], [932496, 435401, 261516, 197529, 150331, 120925, 92600, 75135], [1126000, 592719, 387634, 307674, 244289, 201934, 163189, 137760], [1505000, 926165, 673475, 564959, 469229, 399830, 344043, 304396], [1743000, 1149000, 874409, 748206, 632011, 543726, 479471, 431697], [306136, 47722, 10795, 3880, 1772, 857, 309, 136], [606931, 180188, 74024, 43472, 27432, 19059, 11162, 7516], [894705, 370238, 200149, 142231, 104096, 81696, 57685, 44208], [1164000, 587923, 369609, 287969, 227321, 188985, 146521, 120312], [1410000, 810125, 556781, 457618, 378091, 324503, 266610, 228388], [1909000, 1298000, 1005000, 878958, 764456, 680643, 600868, 542855], [2238000, 1640000, 1340000, 1200000, 1064000, 959739, 872623, 805597]], future: [[4, 0, 0, 0, 0, 0, 0, 0], [17, 0, 0, 0, 0, 0, 0, 0], [36, 0, 0, 0, 0, 0, 0, 0], [59, 1, 0, 0, 0, 0, 0, 0], [84, 1, 0, 0, 0, 0, 0, 0], [131, 1, 0, 0, 0, 0, 0, 0], [163, 2, 0, 0, 0, 0, 0, 0], [16, 0, 0, 0, 0, 0, 0, 0], [67, 1, 0, 0, 0, 0, 0, 0], [146, 2, 0, 0, 0, 0, 0, 0], [226, 4, 0, 0, 0, 0, 0, 0], [328, 8, 0, 0, 0, 0, 0, 0], [504, 12, 0, 0, 0, 0, 0, 0], [631, 17, 0, 0, 0, 0, 0, 0], [32, 1, 0, 0, 0, 0, 0, 0], [150, 4, 1, 1, 0, 0, 0, 0], [343, 11, 1, 1, 0, 0, 0, 0], [552, 17, 2, 1, 0, 0, 0, 0], [769, 26, 3, 1, 0, 0, 0, 0], [1214, 48, 3, 1, 0, 0, 0, 0], [1502, 62, 3, 1, 0, 0, 0, 0], [67, 1, 0, 0, 0, 0, 0, 0], [259, 7, 2, 1, 0, 0, 0, 0], [593, 19, 3, 1, 0, 0, 0, 0], [959, 35, 6, 1, 0, 0, 0, 0], [1343, 54, 8, 1, 0, 0, 0, 0], [2147, 105, 10, 1, 0, 0, 0, 0], [2658, 140, 15, 2, 0, 0, 0, 0], [96, 2, 0, 0, 0, 0, 0, 0], [403, 13, 2, 1, 0, 0, 0, 0], [912, 49, 6, 1, 0, 0, 0, 0], [1482, 82, 10, 1, 0, 0, 0, 0], [2061, 125, 15, 1, 0, 0, 0, 0], [3293, 231, 32, 4, 1, 0, 0, 0], [4082, 298, 39, 6, 2, 0, 0, 0], [449, 19, 2, 1, 0, 0, 0, 0], [1770, 160, 26, 12, 2, 2, 0, 0], [3760, 472, 92, 32, 9, 8, 1, 0], [5912, 805, 185, 60, 22, 12, 2, 0], [8211, 1158, 287, 101, 42, 21, 4, 0], [13086, 1945, 503, 201, 90, 44, 10, 3], [16246, 2477, 653, 255, 115, 57, 12, 3], [1038, 83, 10, 4, 3, 0, 0, 0], [4031, 568, 146, 70, 27, 18, 3, 1], [8422, 1520, 459, 209, 87, 58, 16, 5], [13347, 2718, 911, 451, 232, 151, 48, 22], [18471, 3901, 1378, 679, 375, 240, 72, 35], [29380, 6536, 2390, 1229, 696, 447, 141, 73], [36417, 8230, 3040, 1566, 901, 592, 190, 98], [1862, 191, 37, 13, 9, 2, 0, 0], [7177, 1328, 451, 221, 113, 65, 22, 12], [14879, 3512, 1397, 753, 416, 256, 101, 50], [23694, 6246, 2667, 1530, 924, 609, 252, 132], [32724, 9011, 3981, 2309, 1482, 1022, 417, 231], [52084, 15252, 6892, 4134, 2716, 1902, 787, 431], [64812, 19268, 8790, 5301, 3512, 2482, 1029, 573], [2856, 356, 75, 24, 15, 3, 0, 0], [10891, 2356, 912, 505, 287, 181, 68, 35], [22690, 6302, 2876, 1773, 1114, 760, 346, 189], [36317, 11434, 5576, 3613, 2426, 1757, 831, 481], [50255, 16785, 8489, 5566, 3896, 2889, 1349, 801], [80264, 28707, 15059, 10069, 7201, 5405, 2543, 1531], [100166, 36465, 19349, 12999, 9374, 7077, 3355, 2038], [4037, 557, 134, 53, 26, 8, 1, 0], [15272, 3719, 1584, 937, 548, 350, 177, 97], [31917, 10183, 5131, 3399, 2250, 1585, 849, 505], [51181, 18619, 10115, 7089, 5065, 3770, 2003, 1244], [70958, 27477, 15521, 11076, 8170, 6235, 3332, 2094], [114090, 47400, 27789, 20133, 15162, 11937, 6375, 4055], [142851, 60597, 35937, 26158, 19897, 15731, 8430, 5415], [5292, 791, 208, 76, 41, 13, 5, 1], [20157, 5424, 2475, 1502, 888, 590, 316, 179], [42078, 14919, 8053, 5519, 3860, 2767, 1547, 984], [67731, 27507, 16121, 11781, 8797, 6743, 3837, 2504], [94301, 41000, 25049, 18732, 14465, 11426, 6589, 4388], [152602, 71560, 45356, 34638, 27428, 22343, 12932, 8741], [191877, 92182, 59090, 45343, 36213, 29708, 17264, 11727], [6593, 1050, 298, 114, 62, 21, 7, 2], [25470, 7361, 3505, 2185, 1334, 918, 511, 305], [53319, 20474, 11627, 8290, 5913, 4355, 2537, 1707], [86076, 38064, 23543, 17974, 13787, 10790, 6476, 4442], [120200, 57250, 37007, 28947, 23056, 18696, 11443, 7970], [195719, 101352, 68393, 54639, 44891, 37556, 23238, 16352], [247003, 131251, 89520, 71777, 59527, 50210, 31226, 22109], [8062, 1341, 396, 166, 81, 28, 10, 3], [31009, 9496, 4690, 3027, 1887, 1286, 719, 431], [65079, 26550, 15716, 11589, 8457, 6348, 3839, 2625], [105493, 49867, 32183, 25305, 19858, 15847, 9969, 7105], [147910, 75802, 51131, 41280, 33643, 27854, 17906, 12936], [242425, 136069, 96093, 79367, 66969, 57325, 37405, 27321], [307239, 177417, 126838, 105180, 89595, 77338, 50781, 37235], [9551, 1633, 478, 206, 94, 37, 14, 6], [36766, 11684, 5913, 3914, 2444, 1679, 979, 611], [77379, 33038, 20137, 15238, 11252, 8510, 5415, 3766], [125913, 62852, 41872, 33694, 26871, 21708, 14274, 10382], [177271, 96446, 67381, 55775, 46334, 38847, 26199, 19363], [292716, 175377, 128623, 109014, 94049, 81929, 56295, 42251], [372454, 230217, 171198, 145765, 127090, 111818, 77103, 58142], [17073, 3286, 1035, 470, 226, 106, 39, 18], [65872, 23551, 12906, 8974, 5823, 4073, 2596, 1731], [140794, 68601, 45921, 36723, 28072, 21830, 15467, 11644], [232982, 135420, 100055, 85641, 71018, 59212, 44086, 34670], [333235, 214232, 167011, 148142, 128801, 112225, 86336, 69457], [571422, 414657, 343380, 314029, 287496, 263320, 208480, 172147], [747243, 565852, 476886, 439301, 408085, 380097, 303275, 251897], [23901, 4775, 1593, 729, 344, 166, 65, 35], [92081, 34335, 19397, 13763, 9042, 6307, 4183, 2853], [198297, 101897, 70930, 57923, 44781, 35021, 26033, 20207], [331990, 204994, 158045, 138391, 116493, 98058, 77483, 63230], [481348, 331935, 271236, 246728, 218318, 192649, 158250, 132868], [855653, 675616, 591995, 559096, 524785, 490401, 418920, 364236], [1152000, 957063, 858430, 819351, 783026, 747735, 645471, 566592]] };
+        const SURVIVAL_DETAIL = { "MW": [["0.0037%", "0.0207%", 1, 1], null, null, ["0.0037%", "0.0207%", 2, 1], null, null, ["0.0037%", "0.0207%", 2, 1], null, null, ["0.0037%", "0.0207%", 2, 1], null, null, ["0.0037%", "0.0207%", 2, 1], null, null, ["0.0037%", "0.0207%", 2, 1], null, null, ["0.0037%", "0.0207%", 2, 1], null, null, ["0.0114%", "0.0044%", 1, 1], null, null, ["0.0114%", "0.0044%", 1, 1], null, null, ["0.0136%", "0.0009%", 1, 1], null, null, ["0.0136%", "0.0009%", 1, 1], null, null, ["0.0136%", "0.0009%", 1, 1], null, null, ["0.0136%", "0.0009%", 1, 1], null, null, ["0.0136%", "0.0009%", 1, 1], null, null, ["0.0010%", "0.0053%", 1, 1], null, null, ["0.0010%", "0.0053%", 1, 1], null, null, ["0.0010%", "0.0053%", 1, 1], null, null, ["0.0041%", "0.0021%", 1, 1], null, null, ["0.0041%", "0.0021%", 1, 1], null, null, ["0.0041%", "0.0021%", 1, 1], null, null, ["0.0041%", "0.0021%", 1, 1], null, null, ["0.0038%", "0.0018%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0038%", "0.0018%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0035%", "0.0001%", 1, 1], null, null, ["0.0054%", "0.0000%", 1, 1], null, null, ["0.0020%", "0.0006%", 2, 1], null, null, ["0.0020%", "0.0006%", 2, 1], ["0.0489%", "0.0894%", 5, 6], null, ["0.0020%", "0.0006%", 3, 1], ["0.0489%", "0.0894%", 5, 6], null, ["0.0020%", "0.0006%", 3, 1], ["0.0489%", "0.0894%", 5, 6], null, ["0.0020%", "0.0006%", 3, 1], ["0.0489%", "0.0894%", 5, 6], null, ["0.0020%", "0.0006%", 3, 1], ["0.0489%", "0.0894%", 5, 6], null, ["0.0054%", "0.0000%", 1, 1], null, null, ["0.0020%", "0.0006%", 2, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0003%", "0.0023%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0003%", "0.0023%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0003%", "0.0023%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0003%", "0.0023%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0003%", "0.0023%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0054%", "0.0000%", 1, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 2, 1], ["0.0784%", "0.0398%", 8, 4], ["0.1136%", "0.0887%", 8, 8], ["0.0007%", "0.0005%", 3, 1], ["0.0784%", "0.0398%", 8, 4], ["0.1136%", "0.0887%", 8, 8], ["0.0047%", "0.0003%", 2, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.1267%", "0.1255%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.1267%", "0.1255%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0403%", "0.0683%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 3, 1], ["0.0403%", "0.0683%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0047%", "0.0003%", 2, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.1500%", "0.0972%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.0490%", "0.1236%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0480%", "0.0606%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0480%", "0.0606%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 3, 1], ["0.0480%", "0.0606%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0047%", "0.0003%", 2, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.1227%", "0.0718%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0403%", "0.0683%", 4, 4], ["0.0490%", "0.1236%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0480%", "0.0606%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0480%", "0.0606%", 4, 4], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 3, 1], ["0.0480%", "0.0606%", 4, 4], ["0.0837%", "0.0523%", 8, 8], ["0.0047%", "0.0003%", 2, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], null, ["0.0007%", "0.0005%", 1, 1], ["0.0648%", "0.0557%", 6, 6], ["0.1227%", "0.0718%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0648%", "0.0557%", 6, 6], ["0.0490%", "0.1236%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0696%", "0.0436%", 8, 7], ["0.0980%", "0.0602%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0696%", "0.0436%", 8, 7], ["0.0812%", "0.0745%", 8, 8], ["0.0007%", "0.0005%", 4, 1], ["0.0696%", "0.0436%", 8, 7], ["0.0837%", "0.0523%", 8, 8], ["0.0047%", "0.0003%", 2, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], ["0.2966%", "0.0935%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0439%", "0.0165%", 4, 4], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 4, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0047%", "0.0003%", 2, 1], null, null, ["0.0007%", "0.0005%", 1, 1], ["0.0784%", "0.0398%", 8, 4], ["0.2966%", "0.0935%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0439%", "0.0165%", 4, 4], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 4, 1], ["0.0615%", "0.0503%", 5, 6], ["0.0990%", "0.0363%", 8, 8], ["0.0047%", "0.0003%", 2, 1], ["0.2820%", "0.0531%", 4, 5], null, ["0.0007%", "0.0005%", 1, 1], ["0.0264%", "0.0576%", 7, 4], ["0.0817%", "0.1000%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0439%", "0.0165%", 8, 4], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0569%", "0.0712%", 5, 8], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0490%", "0.0681%", 6, 8], ["0.0683%", "0.0516%", 8, 8], ["0.0007%", "0.0005%", 2, 1], ["0.0658%", "0.0458%", 7, 8], ["0.0683%", "0.0516%", 8, 8], ["0.0007%", "0.0005%", 4, 1], ["0.0569%", "0.0712%", 5, 8], ["0.0658%", "0.0458%", 8, 8], ["0.0047%", "0.0003%", 2, 1], ["0.2820%", "0.0531%", 4, 5], null, ["0.0007%", "0.0005%", 1, 1], ["0.0264%", "0.0576%", 7, 4], ["0.0924%", "0.0681%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0439%", "0.0165%", 8, 4], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0589%", "0.0648%", 5, 8], ["0.0990%", "0.0363%", 8, 8], ["0.0007%", "0.0005%", 1, 1], ["0.0490%", "0.0681%", 6, 8], ["0.0683%", "0.0516%", 8, 8], ["0.0064%", "0.0000%", 1, 1], ["0.0727%", "0.0331%", 7, 8], ["0.0683%", "0.0516%", 8, 8], ["0.0041%", "0.0046%", 8, 1], ["0.0727%", "0.0331%", 7, 8], ["0.0658%", "0.0458%", 8, 8]],
+                                  "PC": [null, null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, null, null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0016%", "0.0169%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0005%", "0.0051%", 1, 1], null, null, ["0.0005%", "0.0051%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0005%", "0.0051%", 1, 1], ["0.0802%", "0.2965%", 5, 4], null, ["0.0005%", "0.0051%", 1, 1], ["0.0802%", "0.2965%", 5, 4], null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.0802%", "0.2965%", 5, 4], ["0.0994%", "0.4699%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.1022%", "0.0767%", 4, 4], ["0.0994%", "0.4699%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.1399%", "0.1053%", 4, 7], null, ["0.0041%", "0.0019%", 1, 1], ["0.1399%", "0.1053%", 8, 7], null, ["0.0041%", "0.0019%", 1, 1], ["0.1399%", "0.1053%", 8, 7], ["0.0994%", "0.4699%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.1022%", "0.0767%", 5, 4], ["0.1423%", "0.3264%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.1022%", "0.0767%", 5, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.1022%", "0.0767%", 5, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.2880%", "0.1320%", 5, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], null, ["0.0010%", "0.0087%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0010%", "0.0087%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0022%", "0.0012%", 1, 1], ["0.0807%", "0.0607%", 4, 8], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.1832%", "0.0828%", 4, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.1832%", "0.0828%", 4, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], null, ["0.0010%", "0.0087%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0010%", "0.0087%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0010%", "0.0087%", 1, 1], ["0.0807%", "0.0607%", 4, 8], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.1832%", "0.0828%", 4, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.1832%", "0.0828%", 4, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1714%", "0.1838%", 8, 8], ["0.0010%", "0.0087%", 1, 1], ["0.0502%", "0.1480%", 5, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0071%", "0.0008%", 2, 1], ["0.0502%", "0.1480%", 5, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0071%", "0.0008%", 2, 1], ["0.0807%", "0.0607%", 4, 8], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.1832%", "0.0828%", 4, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.1166%", "0.1101%", 8, 4], ["0.2650%", "0.1002%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1707%", "0.1128%", 8, 8], ["0.0004%", "0.0060%", 2, 1], ["0.0502%", "0.1480%", 5, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0004%", "0.0060%", 8, 1], ["0.0908%", "0.1102%", 4, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0071%", "0.0008%", 3, 1], ["0.0807%", "0.0607%", 5, 8], ["0.1590%", "0.0923%", 8, 8], ["0.0041%", "0.0019%", 1, 1], null, null, ["0.0041%", "0.0019%", 1, 1], ["0.1832%", "0.0828%", 4, 5], null, ["0.0041%", "0.0019%", 1, 1], ["0.0354%", "0.1784%", 4, 4], ["0.2650%", "0.1002%", 8, 8], ["0.0041%", "0.0019%", 1, 1], ["0.0858%", "0.1013%", 4, 4], ["0.1707%", "0.1128%", 8, 8], ["0.0004%", "0.0060%", 2, 1], ["0.0502%", "0.1480%", 5, 4], ["0.1590%", "0.0923%", 8, 8], ["0.0004%", "0.0060%", 8, 1], ["0.1023%", "0.1283%", 6, 8], ["0.1590%", "0.0923%", 8, 8], ["0.0010%", "0.0087%", 1, 1], ["0.0807%", "0.0607%", 5, 8], ["0.1532%", "0.0735%", 8, 8]]};
+
+        /** 2. LOGIC & OBSERVERS */
+        const mainContainer = document.getElementById('snap-container');
+        const navDots = document.querySelectorAll('nav a');
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    navDots.forEach(dot => dot.classList.toggle('active', dot.getAttribute('href') === '#' + entry.target.id));
+                }
+            });
+        }, { root: mainContainer, threshold: 0.5 });
+        document.querySelectorAll('section').forEach(s => observer.observe(s));
+
+        window.scrollToId = (id) => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: 'smooth' }); };
+
+        async function copyCode(elementId) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            try {
+                await navigator.clipboard.writeText(el.innerText);
+                const btn = el.previousElementSibling.querySelector('.copy-btn');
+                const originalText = btn.innerText;
+                btn.innerText = 'Copied!';
+                setTimeout(() => btn.innerText = originalText, 1500);
+            } catch (err) { alert('복사 실패'); }
+        }
+
+        /** 3. ANIMATIONS */
+        const typeTexts = ["Robust", "User Group", "Assignment", "for A/B TEST."];
+        const typeIds = ["hero-type-1", "hero-type-2", "hero-type-3", "hero-type-4"];
+
+        function typeWriter(text, elementId, speed) {
+            return new Promise(resolve => {
+                const element = document.getElementById(elementId);
+                if (!element || element.getAttribute('data-typed') === 'true') { resolve(); return; }
+                element.innerText = ""; element.setAttribute('data-typed', 'true'); element.classList.add('cursor-active');
+                let i = 0;
+                function type() {
+                    if (i < text.length) { element.innerHTML += text.charAt(i); i++; setTimeout(type, speed); } 
+                    else { resolve(); }
+                }
+                type();
+            });
+        }
+
+        function animateCount(id, start, end, duration) {
+            const obj = document.getElementById(id); if (!obj) return;
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                obj.innerHTML = Math.floor(progress * (end - start) + start).toLocaleString();
+                if (progress < 1) window.requestAnimationFrame(step);
+                else obj.innerHTML = end.toLocaleString();
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        async function initAnimations() {
+            if (window.animStarted) return;
+            window.animStarted = true;
+            for (let i = 0; i < typeTexts.length; i++) {
+                if (i > 0) document.getElementById(typeIds[i - 1]).classList.remove('cursor-active');
+                await typeWriter(typeTexts[i], typeIds[i], 150);
+            }
+            document.getElementById(typeIds[typeIds.length - 1]).classList.add('cursor-active');
+            setTimeout(() => animateCount("hero-count", 0, 100000000, 2500), 200);
+        }
+        if (document.readyState === 'complete') initAnimations(); else window.addEventListener('load', initAnimations);
+
+        const highlightObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) setTimeout(() => entry.target.classList.add('highlight-active'), 200);
+                else entry.target.classList.remove('highlight-active');
+            });
+        }, { threshold: 0.1 });
+        document.querySelectorAll('.split-title-main').forEach(el => { el.classList.add('highlight-text'); highlightObserver.observe(el); });
+
+        /** 4. MODAL & RENDER */
+        window.openModal = (inputId) => {
+            let platform = 'PC';
+            if (inputId && typeof inputId === 'string' && (inputId.toLowerCase().includes('mobile') || inputId.toLowerCase().includes('mw'))) platform = 'MW';
+            currentPlatform = platform;
+            
+            const modal = document.getElementById('resultModal');
+            const content = modal.querySelector('.modal-content');
+            
+            content.classList.add('pc-mode');
+            document.getElementById('pcSidebar').style.display = 'flex';
+            document.getElementById('sidebarPlatform').innerText = platform;
+            document.getElementById('modalTitle').innerText = `${platform} Platform Result Detail`;
+            
+            modal.style.display = 'flex';
+            document.querySelectorAll('.table-container-scroll').forEach(el => el.scrollTop = 0);
+            
+            requestAnimationFrame(() => { modal.style.opacity = '1'; content.style.transform = 'translateY(0)'; });
+            renderTables(platform);
+            goToSlide(0);
+        };
+
+        window.closeModal = () => {
+            const modal = document.getElementById('resultModal');
+            const content = modal.querySelector('.modal-content');
+            modal.style.opacity = '0';
+            content.style.transform = 'translateY(20px)';
+            setTimeout(() => { modal.style.display = 'none'; }, 300);
+        };
+
+        function createRowHtml(cond, dataRow) {
+            if (!dataRow) return '';
+            const tds = dataRow.map(v => `<td>${v === 0 ? '-' : v.toLocaleString()}</td>`).join('');
+            return `<tr><td style="font-weight:bold;">${cond.id}</td><td class="limit-cell">${cond.exp}</td><td class="limit-cell">${cond.ctr}</td>${tds}</tr>`;
+        }
+
+        function renderTables(platform) {
+            const data = platform === 'PC' ? PC_DATA : MW_DATA;
+            let pastHtml = '', futureHtml = '', survivalHtml = '';
+
+            if (data.past && data.past.length > 0) {
+                CONDITIONS.forEach((cond, i) => {
+                    pastHtml += createRowHtml(cond, data.past[i]);
+                    futureHtml += createRowHtml(cond, data.future[i]);
+                });
+            }
+            document.querySelector('#pastTable tbody').innerHTML = pastHtml;
+            document.querySelector('#futureTable tbody').innerHTML = futureHtml;
+
+            const survivalData = SURVIVAL_DETAIL[platform];
+            const TYPE_NAMES = ['ACCURACY', 'OPTIMIZATION', 'SURVIVAL'];
+            const TYPE_COLORS = ['#333', '#0056b3', '#d32f2f'];
+
+            if (survivalData && survivalData.length > 0) {
+                CONDITIONS.forEach((cond, cIndex) => {
+                    TYPE_NAMES.forEach((typeName, tIndex) => {
+                        const val = survivalData[(cIndex * 3) + tIndex];
+                        const expErr = val ? val[0] : '-', ctrErr = val ? val[1] : '-', pastW = val ? val[2] + 'w' : '-', futW = val ? val[3] + 'w' : '-';
+                        const futColor = (val && val[3] === 8) ? '#00c853' : '#d32f2f';
+                        survivalHtml += `<tr>
+                            <td style="font-weight:bold;">${cond.id}</td>
+                            <td style="font-size:0.75rem; font-weight:700; color:${TYPE_COLORS[tIndex]}; letter-spacing:-0.5px;">${typeName}</td>
+                            <td class="limit-cell">${cond.exp}</td><td class="limit-cell">${cond.ctr}</td>
+                            <td>${expErr}</td><td>${ctrErr}</td>
+                            <td style="font-weight:bold; color:#666;">${pastW}</td><td style="font-weight:bold; color:${futColor};">${futW}</td>
+                        </tr>`;
+                    });
+                });
+            }
+            document.querySelector('#survivalTable tbody').innerHTML = survivalHtml;
+        }
+
+        window.goToSlide = (index) => {
+            currentSlide = index;
+            document.getElementById('carouselTrack').style.transform = `translateX(-${index * (100 / 3)}%)`;
+            document.querySelectorAll('.nav-dot').forEach((dot, i) => dot.classList.toggle('active', i === index));
+        };
+    </script>
+
+    <!-- Copyright -->
+    <div class="copyright-watermark">Copyright © 2025 Kim Beom-Soo. All rights reserved.</div>
+
+</body>
+</html>

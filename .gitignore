@@ -1,0 +1,10 @@
+# Exclude all markdown files (reports, drafts)
+*.md
+
+# Exclude redundant local resume file (served as index.html)
+김범수_이력서.html
+
+# Exclude system files
+Thumbs.db
+Desktop.ini
+.DS_Store
