@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=1280">
 
     <title>김범수 | Data Analyst</title>
 
@@ -45,11 +46,11 @@
         .modal-content-inner::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.4); border-radius: 4px; }
         .modal-content-inner::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.6); }
 
-        #snap-container { width: 100%; height: 100vh; overflow-y: scroll; scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+        #snap-container { width: 100%; height: 100vh; height: 100dvh; overflow-y: scroll; scroll-snap-type: y mandatory; scroll-behavior: smooth; }
         .container { width: 100%; max-width: var(--container-max-width); margin: 0 auto; }
         .flex-center-col { display: flex; flex-direction: column; justify-content: center; height: 100%; }
         
-        section { width: 100%; height: 100vh; scroll-snap-align: start; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 5%; box-sizing: border-box; opacity: 0; transform: translateY(20px); transition: opacity 1.0s ease, transform 1.0s ease; will-change: opacity, transform; }
+        section { width: 100%; height: 100vh; height: 100dvh; scroll-snap-align: start; scroll-snap-stop: always; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 5%; box-sizing: border-box; opacity: 0; transform: translateY(20px); transition: opacity 1.0s ease, transform 1.0s ease; will-change: opacity, transform; }
         section.visible { opacity: 1; transform: translateY(0); }
 
         /* Typography */
@@ -272,6 +273,29 @@
         .project-modal-close { cursor: pointer; padding: 5px; font-size: 1.5rem; line-height: 1; color: #666; transition: color 0.2s; }
         .project-modal-close:hover { color: #000; }
         .project-modal-content { flex: 1; width: 100%; height: 100%; border: none; background: #fff; }
+        /* ==========================================================================
+           12. MOBILE (TOUCH) — PC 레이아웃을 그대로 유지하고 조작만 탭으로 전환
+           ========================================================================== */
+        #snap-container.no-snap { scroll-snap-type: none; }
+        .panel .content { pointer-events: none; }
+        .panel:hover .content, .panel.is-open .content { pointer-events: auto; }
+        .panel.is-open { flex: 9; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); z-index: 10; }
+        .panel.is-open::before { height: 100%; }
+        .panel.is-open * { color: #fff !important; border-color: #555 !important; }
+        .panel.is-open .rotated-title { opacity: 0; }
+        .panel.is-open .content { opacity: 1; transform: translateY(-20px); transition: all 0.4s 0.1s ease-out; }
+        .panel.is-open .view-details-btn { color: #000 !important; }
+
+        #rotate-hint { display: none; }
+        @media (orientation: portrait) and (pointer: coarse) {
+            #rotate-hint { display: flex; position: fixed; inset: 0; z-index: 20000; background: #fff;
+                           flex-direction: column; align-items: center; justify-content: center; gap: 3vw;
+                           font-family: inherit; color: #222; text-align: center; padding: 0 8vw; }
+            #rotate-hint .ico { font-size: 11vw; line-height: 1; }
+            #rotate-hint .msg { font-size: 4.4vw; font-weight: 700; letter-spacing: -0.02em; }
+            #rotate-hint .sub { font-size: 3.1vw; color: #777; font-weight: 400; line-height: 1.8; }
+            #rotate-hint .sub b { color: #222; font-weight: 700; }
+        }
     </style>
 </head>
 <body>
@@ -960,6 +984,12 @@
     <!-- Copyright -->
     <div class="copyright-watermark">Copyright © 2026 Kim Beom-Soo. All rights reserved.</div>
 
+    <!-- 모바일 세로 안내 -->
+    <div id="rotate-hint">
+        <div class="ico">&#128241;</div>
+        <div class="msg">화면을 가로로 돌려주세요</div>
+        <div class="sub">가로 화면에서 PC와 동일하게 보실 수 있습니다.<br>각 항목은 <b>탭</b>하면 상세 내용이 열립니다.</div>
+    </div>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const snapContainer = document.getElementById('snap-container');
@@ -967,6 +997,8 @@
             const portalOverlay = document.getElementById('global-story-overlay');
             const portalContentBox = portalOverlay.querySelector('.overlay-content-box');
             let hoverTimer;
+            /* 터치 기기 판별 — PC는 기존 마우스오버 경로를 그대로 사용 */
+            const IS_TOUCH = window.matchMedia('(hover: none), (pointer: coarse)').matches;
 
             // Utilities
             snapContainer.focus();
@@ -1019,34 +1051,61 @@
                 const marker = item.querySelector('.h-marker');
                 if (!sourceModal || !marker) return;
 
-                item.addEventListener('mouseenter', () => {
-                    clearTimeout(hoverTimer);
-                    hoverTimer = setTimeout(() => {
-                        const isEducation = item.classList.contains('education');
-                        portalOverlay.classList.toggle('education-mode', isEducation);
+                const showPortal = () => {
+                    const isEducation = item.classList.contains('education');
+                    portalOverlay.classList.toggle('education-mode', isEducation);
 
-                        portalContentBox.innerHTML = `
-                            <div class="shadow-block"></div>
-                            <div class="content-padding modal-content-inner" style="max-height: 93vh; overflow-y: auto;">
-                                ${sourceModal.querySelector('.modal-content').innerHTML}
-                            </div>
-                        `;
+                    portalContentBox.innerHTML = `
+                        <div class="shadow-block"></div>
+                        <div class="content-padding modal-content-inner" style="max-height: 93vh; overflow-y: auto;">
+                            ${sourceModal.querySelector('.modal-content').innerHTML}
+                        </div>
+                    `;
 
-                        const markerRect = marker.getBoundingClientRect();
-                        const screenCenter = window.innerWidth / 2;
-                        const markerCenter = markerRect.left + markerRect.width / 2;
-                        let xOffset = (markerCenter - screenCenter) * 0.3;
-                        const maxOffset = 250;
-                        xOffset = Math.max(-maxOffset, Math.min(maxOffset, xOffset));
+                    const markerRect = marker.getBoundingClientRect();
+                    const screenCenter = window.innerWidth / 2;
+                    const markerCenter = markerRect.left + markerRect.width / 2;
+                    let xOffset = (markerCenter - screenCenter) * 0.3;
+                    const maxOffset = 250;
+                    xOffset = Math.max(-maxOffset, Math.min(maxOffset, xOffset));
 
-                        portalContentBox.style.transform = `translate(calc(-50% + ${xOffset}px), -50%)`;
-                        portalOverlay.classList.add('active');
-                    }, 200);
-                });
+                    portalContentBox.style.transform = `translate(calc(-50% + ${xOffset}px), -50%)`;
+                    portalOverlay.classList.add('active');
+                };
 
-                item.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
+                if (IS_TOUCH) {
+                    /* 모바일 : 탭하면 즉시 열림 */
+                    item.addEventListener('click', (e) => { e.stopPropagation(); showPortal(); });
+                } else {
+                    /* PC : 기존 마우스오버 동작 그대로 */
+                    item.addEventListener('mouseenter', () => {
+                        clearTimeout(hoverTimer);
+                        hoverTimer = setTimeout(showPortal, 200);
+                    });
+                    item.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
+                }
             });
 
+            /* 모바일 : 프로젝트 패널을 탭으로 펼침 (PC는 마우스오버 그대로) */
+            if (IS_TOUCH) {
+                document.querySelectorAll('#projects .panel').forEach(panel => {
+                    panel.addEventListener('click', (e) => {
+                        if (e.target.closest('.view-details-btn')) return;
+                        const wasOpen = panel.classList.contains('is-open');
+                        document.querySelectorAll('#projects .panel.is-open').forEach(p => p.classList.remove('is-open'));
+                        if (!wasOpen) panel.classList.add('is-open');
+                    });
+                });
+            }
+
+            /* 확대 중에는 스크롤 스냅을 꺼서 화면 이동이 튀지 않게 함 */
+            if (window.visualViewport) {
+                const syncSnap = () => {
+                    snapContainer.classList.toggle('no-snap', window.visualViewport.scale > 1.05);
+                };
+                window.visualViewport.addEventListener('resize', syncSnap);
+                window.visualViewport.addEventListener('scroll', syncSnap);
+            }
             portalContentBox.addEventListener('mouseleave', closePortal);
             portalOverlay.addEventListener('click', (e) => {
                 if (e.target === portalOverlay || e.target.classList.contains('overlay-backdrop')) closePortal();
