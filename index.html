@@ -11,7 +11,6 @@
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700&family=Noto+Sans+KR:wght@100;300;400;500;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
 
-
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-GPRXE267FF"></script>
     <script>
@@ -81,7 +80,7 @@
         /* ==========================================================================
            5. PROFILE SECTION
            ========================================================================== */
-        .profile-container { display: flex; width: 100%; height: 70vh; gap: 60px; align-items: stretch; }
+        .profile-container { display: flex; width: 100%; height: auto; gap: 60px; align-items: stretch; }
         /* Left */
         .profile-left { flex: 0.8; border-right: 2px solid var(--text-primary); padding-right: 60px; display: flex; flex-direction: column; text-align: right; justify-content: flex-start; }
         .profile-title { font-size: 5rem; font-weight: 100; margin: 0; line-height: 0.9; letter-spacing: -2px; color: var(--text-primary); }
@@ -92,7 +91,7 @@
         .contact-value { font-family: inherit; font-weight: 500; font-size: 1rem; color: #222; }
 
         /* Right */
-        .profile-right { flex: 1.3; display: flex; flex-direction: column; overflow-y: hidden; justify-content: flex-start; padding-top: 52.5px; height: 100%; gap: 40px; }
+        .profile-right { flex: 1.3; display: flex; flex-direction: column; overflow: visible; justify-content: flex-start; padding-top: 52.5px; height: auto; gap: 40px; }
         .spec-title { font-size: 1rem; font-weight: 500; text-transform: uppercase; letter-spacing: 2px; border-bottom: 2px solid var(--accent-color); padding-bottom: 4px; margin-bottom: 25px; display: block; color: var(--accent-color); margin-top: 0; }
         .spec-title.first { margin-top: 0; }
         .list-item { display: grid; grid-template-columns: 140px 1fr; margin-bottom: 12px; align-items: center; }
@@ -110,7 +109,7 @@
         /* ==========================================================================
            6. CAREER (TIMELINE)
            ========================================================================== */
-        #story { justify-content: flex-start; height: 100vh; padding-top: 9.5vh; overflow: visible !important; z-index: 10; }
+        #story { justify-content: flex-start; height: 100vh; padding-top: 60px; overflow: visible !important; z-index: 10; }
         #story .huge-title { text-align: right; margin-left: auto; }
         .h-timeline-container { position: relative; width: 92.5%; margin: 150px auto 0; padding: 150px 0; margin-top: 150px; transform: translateX(-50px); z-index: 20; }
         .h-line { position: absolute; top: 50%; left: 0; width: 0; height: 1px; background-color: var(--line-color); transform: translateY(-50%); z-index: 0; transition: width 1.5s cubic-bezier(0.25, 1, 0.5, 1); }
@@ -180,7 +179,7 @@
            ========================================================================== */
         #projects { padding: 0; height: 100vh; background: #fff; position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
         #projects h2.project-header { text-align: left; font-size: 2.5rem; }
-        .h-acc { display: flex; width: 100%; height: 55vh; margin-top: 5vh; border-top: 2px solid var(--border-color); border-bottom: 2px solid var(--border-color); overflow: hidden;}
+        .h-acc { display: flex; width: 100%; height: 553px; flex-shrink: 0; margin-top: 50px; border-top: 2px solid var(--border-color); border-bottom: 2px solid var(--border-color); overflow: hidden;}
         .panel { flex: 1; border-right: 2px solid var(--border-color); position: relative; transition: flex 0.6s cubic-bezier(0.25, 1, 0.5, 1), transform 0.4s ease-out; display: flex; flex-direction: column; justify-content: flex-end; padding: 40px 10px; background: #fff; cursor: pointer; z-index: 0; will-change: flex, transform; box-sizing: border-box; min-width: 0;}
         .panel:first-child { border-left: 2px solid var(--border-color); }
         .panel:last-child { border-right: 2px solid var(--border-color); }
@@ -285,6 +284,19 @@
         .panel.is-open .rotated-title { opacity: 0; }
         .panel.is-open .content { opacity: 1; transform: translateY(-20px); transition: all 0.4s 0.1s ease-out; }
         .panel.is-open .view-details-btn { color: #000 !important; }
+
+        /* 화면 높이에 맞춰 섹션 내용을 통째로 축소 — 스냅(한 화면 = 한 섹션)을 유지하면서
+           작은 화면에서도 잘리지 않게 한다. 배율은 JS가 섹션별로 계산해 넣는다. */
+        section > .container { transform-origin: center center; will-change: transform; }
+        #story > .container { transform-origin: center top; }
+
+        /* 화면이 좁으면 오른쪽 고정 내비게이션(점 + 라벨, 우측 끝에서 약 135px)이
+           본문 글자와 겹친다. 1400px 이하에서만 오른쪽 여백을 확보한다.
+           (그 이상 넓은 화면 = PC 는 기존 배치 그대로) */
+        @media (max-width: 1400px) {
+            section { padding-right: 150px; }
+            #projects { padding-right: 150px; }
+        }
 
         #rotate-hint { display: none; }
         @media (orientation: portrait) and (pointer: coarse) {
@@ -1011,19 +1023,25 @@
             // Observers
             const sectionIdToLabelMap = { 'hero': 'OVERVIEW', 'profile': 'PROFILE', 'story': 'CAREER', 'projects': 'PROJECTS' };
 
+            /* 섹션 높이가 화면보다 클 수 있으므로(모바일·노트북) 노출 '비율'에 의존하지 않는다.
+               표시는 조금만 보여도 켜고, 네비 표시는 가장 많이 보이는 섹션을 따른다. */
+            const sectionRatio = new Map();
             const mainObserver = new IntersectionObserver((entries) => {
                 entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('visible');
-                        navDots.forEach(a => a.classList.remove('active'));
-                        const targetLabel = sectionIdToLabelMap[entry.target.id];
-                        if (targetLabel) {
-                            const nav = document.querySelector(`nav a[data-label="${targetLabel}"]`);
-                            if (nav) nav.classList.add('active');
-                        }
-                    }
+                    if (entry.intersectionRatio >= 0.1) entry.target.classList.add('visible');
+                    sectionRatio.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
                 });
-            }, { root: snapContainer, threshold: 0.5 });
+                let best = null, bestRatio = 0;
+                sectionRatio.forEach((r, el) => { if (r > bestRatio) { bestRatio = r; best = el; } });
+                if (best) {
+                    const targetLabel = sectionIdToLabelMap[best.id];
+                    if (targetLabel) {
+                        navDots.forEach(a => a.classList.remove('active'));
+                        const nav = document.querySelector(`nav a[data-label="${targetLabel}"]`);
+                        if (nav) nav.classList.add('active');
+                    }
+                }
+            }, { root: snapContainer, threshold: [0, 0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1] });
             document.querySelectorAll('section').forEach(s => mainObserver.observe(s));
 
             const animationObserver = new IntersectionObserver((entries) => {
@@ -1057,7 +1075,7 @@
 
                     portalContentBox.innerHTML = `
                         <div class="shadow-block"></div>
-                        <div class="content-padding modal-content-inner" style="max-height: 93vh; overflow-y: auto;">
+                        <div class="content-padding modal-content-inner" style="max-height: 93vh; max-height: 93dvh; overflow-y: auto;">
                             ${sourceModal.querySelector('.modal-content').innerHTML}
                         </div>
                     `;
@@ -1098,6 +1116,30 @@
                 });
             }
 
+            /* 섹션마다 내용의 실제 높이를 재서, 화면에 안 들어가면 그만큼만 축소한다.
+               (레이아웃·비율은 그대로, 크기만 줄어듦 → 스냅 한 화면 구성 유지) */
+            const fitSections = () => {
+                document.querySelectorAll('section').forEach(sec => {
+                    const box = sec.querySelector(':scope > .container');
+                    if (!box) return;
+                    const cs = getComputedStyle(sec);
+                    const avail = sec.clientHeight - parseFloat(cs.paddingTop || 0)
+                                                   - parseFloat(cs.paddingBottom || 0) - 16;
+                    /* .container 는 height:100% 라 그냥 재면 화면 높이가 그대로 나온다.
+                       잠깐 auto 로 풀어 내용의 실제 높이를 잰 뒤 되돌린다. */
+                    const keep = box.style.height;
+                    box.style.height = 'auto';
+                    const natural = box.scrollHeight;
+                    box.style.height = keep;
+                    if (!natural || avail <= 0) return;
+                    const s = Math.min(1, avail / natural);
+                    box.style.transform = s < 0.999 ? `scale(${s.toFixed(4)})` : '';
+                });
+            };
+            fitSections();
+            window.addEventListener('resize', fitSections);
+            window.addEventListener('load', fitSections);
+            if (window.visualViewport) window.visualViewport.addEventListener('resize', fitSections);
             /* 확대 중에는 스크롤 스냅을 꺼서 화면 이동이 튀지 않게 함 */
             if (window.visualViewport) {
                 const syncSnap = () => {
