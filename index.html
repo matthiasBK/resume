@@ -1118,13 +1118,26 @@
 
             /* 섹션마다 내용의 실제 높이를 재서, 화면에 안 들어가면 그만큼만 축소한다.
                (레이아웃·비율은 그대로, 크기만 줄어듦 → 스냅 한 화면 구성 유지) */
+            /* 모바일은 주소창이 들락거려 화면 높이가 변한다. 주소창이 보일 때의 높이(svh)를
+               실시간으로 재서, 그 상태에서도 잘리지 않도록 기준을 잡는다. */
+            const svhProbe = document.createElement('div');
+            svhProbe.setAttribute('aria-hidden', 'true');
+            svhProbe.style.cssText = 'position:absolute;top:0;left:0;width:0;height:100svh;'
+                                   + 'visibility:hidden;pointer-events:none';
+            document.body.appendChild(svhProbe);
+
+            /* 축소가 필요한 작은 화면에서만 추가로 주는 여유 (한눈에 들어오게) */
+            const COMFORT = 0.93;
+
             const fitSections = () => {
+                const svh = svhProbe.offsetHeight || 0;
                 document.querySelectorAll('section').forEach(sec => {
                     const box = sec.querySelector(':scope > .container');
                     if (!box) return;
                     const cs = getComputedStyle(sec);
-                    const avail = sec.clientHeight - parseFloat(cs.paddingTop || 0)
-                                                   - parseFloat(cs.paddingBottom || 0) - 16;
+                    const base = svh ? Math.min(sec.clientHeight, svh) : sec.clientHeight;
+                    const avail = base - parseFloat(cs.paddingTop || 0)
+                                       - parseFloat(cs.paddingBottom || 0) - 24;
                     /* .container 는 height:100% 라 그냥 재면 화면 높이가 그대로 나온다.
                        잠깐 auto 로 풀어 내용의 실제 높이를 잰 뒤 되돌린다. */
                     const keep = box.style.height;
@@ -1132,7 +1145,8 @@
                     const natural = box.scrollHeight;
                     box.style.height = keep;
                     if (!natural || avail <= 0) return;
-                    const s = Math.min(1, avail / natural);
+                    let s = Math.min(1, avail / natural);
+                    if (s < 0.999) s *= COMFORT;   /* 이미 줄어드는 화면에만 여유를 더한다 */
                     box.style.transform = s < 0.999 ? `scale(${s.toFixed(4)})` : '';
                 });
             };
